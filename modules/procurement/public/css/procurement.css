@@ -1,0 +1,19 @@
+/* procurement.css — เฉพาะหน้างานจัดซื้อ */
+
+.ship-form { padding: 16px 20px; }
+.ship-form-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px; }
+.ship-item-row {
+    display: grid; grid-template-columns: 28px 2fr 1fr 1fr 1fr 1fr;
+    gap: 10px; align-items: center; padding: 9px 12px;
+    border-bottom: 1px solid var(--color-border-soft); font-size: 13.5px;
+}
+.ship-item-row.header-row { background: var(--color-primary-light); font-size: 12px; font-weight: 700; color: var(--color-primary-dark); border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+.ship-item-row.view-only { grid-template-columns: 2fr 1fr 1fr; }
+.ship-item-row input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
+.ship-item-row input[type="number"] { padding: 6px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-size: 13px; width: 100%; }
+.ship-item-row input[type="number"]:disabled { background: #F1F1F1; color: #A9BDB2; }
+.ship-item-row .remaining-zero { color: var(--color-ink-faint); font-style: italic; }
+.ship-meta-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 14px 0; }
+.select-all-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--color-ink-muted); margin-bottom: 10px; }
+.action-bar { display: flex; gap: 10px; }
+.action-bar.align-left { justify-content: flex-start; }

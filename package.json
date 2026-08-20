@@ -1,0 +1,17 @@
+{
+  "name": "smartctx",
+  "version": "1.0.0",
+  "description": "SmartCtx (Smart Cytotoxic Admixture Service) — พัฒนาโดย CatCode Studio",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "connect-sqlite3": "^0.9.13",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-session": "^1.18.0",
+    "socket.io": "^4.7.5",
+    "sqlite3": "^5.1.7"
+  }
+}

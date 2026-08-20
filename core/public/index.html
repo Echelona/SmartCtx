@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartCtx — Smart Cytotoxic Admixture Service</title>
+<link rel="stylesheet" href="/core/css/theme.css">
+<style>
+    .hub-wrap { max-width: 960px; margin: 0 auto; padding: 48px 24px; }
+    .hub-title { text-align: center; margin-bottom: 8px; color: var(--color-primary-dark); font-size: 26px; }
+    .hub-sub { text-align: center; color: var(--color-ink-muted); margin-bottom: 36px; font-size: 13.5px; }
+    .module-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+    .module-card {
+        background: var(--color-white); border: 1px solid var(--color-border); border-radius: var(--radius-lg);
+        padding: 24px; box-shadow: var(--shadow-card); text-decoration: none; color: inherit;
+        display: flex; flex-direction: column; gap: 10px; transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .module-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-card-hover); text-decoration: none; }
+    .module-card .icon { font-size: 30px; }
+    .module-card h3 { margin: 0; font-size: 16px; color: var(--color-ink); }
+    .module-card p { margin: 0; font-size: 13px; color: var(--color-ink-muted); line-height: 1.5; }
+    .module-card .tag { align-self: flex-start; font-size: 11px; font-weight: 700; color: var(--color-primary-dark); background: var(--color-primary-light); padding: 3px 10px; border-radius: 999px; }
+    .footnote { text-align: center; margin-top: 32px; font-size: 11.5px; color: var(--color-ink-faint); }
+</style>
+</head>
+<body>
+<div class="hub-wrap">
+    <h1 class="hub-title">SmartCtx</h1>
+    <p class="hub-sub">Smart Cytotoxic Admixture Service — V.1.0.0 พัฒนาโดย CatCode Studio</p>
+
+    <div class="module-grid">
+        <a class="module-card" href="/modules/procurement/login.html">
+            <span class="icon">🛒</span>
+            <span class="tag">โมดูลงานคลัง</span>
+            <h3>1.1 งานจัดซื้อ</h3>
+            <p>รับใบเบิกจากงานคลังเคมีบำบัด และบันทึกการจัดส่ง</p>
+        </a>
+        <a class="module-card" href="/modules/stock-management/login.html">
+            <span class="icon">📦</span>
+            <span class="tag">โมดูลงานคลัง</span>
+            <h3>1.2 งานคลังเคมีบำบัด</h3>
+            <p>สร้างรายการจัดซื้อ รับเข้าคลังตามใบส่งของ ติดตามยอดค้างจ่าย และสต๊อกคงเหลือ</p>
+        </a>
+        <a class="module-card" href="/modules/chemo-prep/login.html">
+            <span class="icon">🧪</span>
+            <span class="tag">โมดูลงานผลิต</span>
+            <h3>งานผสมเคมีบำบัดเฉพาะราย</h3>
+            <p>คำนวณและเตรียมยาเคมีบำบัดสำหรับผู้ป่วยเฉพาะราย</p>
+        </a>
+        <a class="module-card" href="/modules/pharm-care-unit/login.html">
+            <span class="icon">🩺</span>
+            <span class="tag">โมดูลงานดูแลผู้ป่วย</span>
+            <h3>Pharm Care Unit</h3>
+            <p>งานดูแลผู้ป่วยด้านเภสัชกรรม</p>
+        </a>
+    </div>
+
+    <p class="footnote">ทุกโมดูลต้องเข้าสู่ระบบแยกกัน</p>
+</div>
+</body>
+</html>

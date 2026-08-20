@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>เข้าสู่ระบบ — งานผสมเคมีบำบัดเฉพาะราย | SmartCtx</title>
+<style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background: #f4f6f9;
+        display: flex; justify-content: center; align-items: center;
+        min-height: 100vh; padding: 20px;
+    }
+    .login-card {
+        background: #ffffff; border: 1px solid #e1e4e8; border-radius: 12px;
+        padding: 34px 32px; width: 100%; max-width: 380px;
+        box-shadow: 0 8px 24px rgba(13,138,114,0.14);
+        text-align: center;
+    }
+    .login-logo { display: block; width: 200px; height: auto; margin: 0 auto 16px; }
+    .brand { font-size: 20px; font-weight: bold; color: #0d8a72; margin-bottom: 4px; }
+    .subbrand { font-size: 13px; color: #7f8c8d; margin-bottom: 22px; }
+    .form-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; text-align: left; }
+    label { font-size: 13px; font-weight: 600; color: #586069; }
+    input {
+        width: 100%; padding: 10px 12px; border: 1px solid #e1e4e8;
+        border-radius: 8px; font-size: 15px;
+    }
+    input:focus { outline: 2px solid #0d8a72; background-color: #f0fdfa; }
+    .btn-login {
+        background: #0d8a72; color: white; border: none; font-size: 16px; font-weight: bold;
+        padding: 12px; width: 100%; border-radius: 8px; cursor: pointer; margin-top: 6px;
+    }
+    .btn-login:hover { background: #0a6b58; }
+    .error-msg {
+        color: #d73a49; background: #ffebee; padding: 8px; border-radius: 6px;
+        font-size: 13px; margin-bottom: 14px; display: none; text-align: center;
+    }
+    .back-link { display: block; margin-top: 18px; font-size: 12.5px; color: #7f8c8d; }
+</style>
+</head>
+<body>
+<div class="login-card">
+    <img src="/core/img/logo.png" alt="CatCode Studio" class="login-logo">
+    <div class="brand">🧪 งานผสมเคมีบำบัดเฉพาะราย</div>
+    <div class="subbrand">SmartCtx — Smart Cytotoxic Admixture Service</div>
+
+    <div id="error-box" class="error-msg"></div>
+
+    <form id="loginForm">
+        <div class="form-group">
+            <label>ชื่อผู้ใช้ (Username)</label>
+            <input type="text" id="username" autocomplete="username" required>
+        </div>
+        <div class="form-group">
+            <label>รหัสผ่าน (Password)</label>
+            <input type="password" id="password" autocomplete="current-password" required>
+        </div>
+        <button type="submit" class="btn-login">🔓 เข้าสู่ระบบ</button>
+    </form>
+    <a class="back-link" href="/">← กลับหน้าเลือกโมดูล</a>
+</div>
+
+<script>
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const username = document.getElementById('username').value;
+        const password = document.getElementById('password').value;
+        const errorBox = document.getElementById('error-box');
+        errorBox.style.display = 'none';
+        try {
+            const res = await fetch('/modules/chemo-prep/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+            const data = await res.json();
+            if (data.success) {
+                window.location.href = '/modules/chemo-prep/chemoprep.html';
+            } else {
+                errorBox.textContent = '❌ ' + (data.message || 'เข้าสู่ระบบไม่สำเร็จ');
+                errorBox.style.display = 'block';
+            }
+        } catch (err) {
+            errorBox.textContent = '❌ เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์';
+            errorBox.style.display = 'block';
+        }
+    });
+</script>
+</body>
+</html>

@@ -1,0 +1,80 @@
+/* stock.css — เฉพาะหน้างานคลังเคมีบำบัด */
+.line-item-row.receipt-row { grid-template-columns: 1.6fr 1fr 1fr 1fr 0.8fr 0.8fr auto; }
+
+/* Drug master add/edit form — เปิด/ปิดด้วย class .open (แนวทางเดียวกับ admin.js: openAddMed/closeAddMed) */
+.add-drug-form {
+    display: none;
+    background: var(--color-primary-lighter);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 16px 18px;
+    margin-bottom: 18px;
+}
+.add-drug-form.open { display: block; }
+.add-drug-form h3 { margin: 0 0 12px; font-size: 15px; color: var(--color-ink); }
+.drug-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+
+.required-mark { color: var(--color-danger-text); }
+
+.cart-picker {
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    background: var(--color-primary-lighter);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    margin-bottom: 14px;
+}
+.cart-picker .form-group { flex: 1; min-width: 120px; }
+.cart-picker select, .cart-picker input { width: 100%; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-size: 13.5px; }
+.cart-table { margin-bottom: 6px; }
+
+/* Danger Zone — ล้างข้อมูลทดสอบ */
+.tab-btn-danger { border-color: var(--color-danger-border); color: var(--color-danger-text); }
+.tab-btn-danger.active { background: var(--color-danger-text); border-color: var(--color-danger-text); color: #fff; }
+.danger-zone { border-color: var(--color-danger-border); }
+.danger-warning {
+    background: var(--color-danger-bg);
+    border: 1px solid var(--color-danger-border);
+    color: var(--color-danger-text);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    font-size: 13.5px;
+    line-height: 1.6;
+    margin-bottom: 16px;
+}
+.btn-danger {
+    background: var(--color-danger-text);
+    color: #fff;
+    border: none;
+    padding: 10px 20px;
+    border-radius: var(--radius-sm);
+    font-weight: 700;
+    cursor: pointer;
+    font-size: 14px;
+}
+.btn-danger:hover { background: #b8283a; }
+
+/* จัดการตัวเลือก dropdown (หน่วย/ขนาดบรรจุ/หน่วยความแรง/หมวดหมู่) */
+.manage-options-panel {
+    display: none;
+    background: var(--color-white);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 16px 18px;
+    margin-bottom: 18px;
+}
+.manage-options-panel.open { display: block; }
+.manage-options-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.manage-options-header h3 { margin: 0; font-size: 15px; color: var(--color-ink); }
+.manage-options-tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+.manage-options-add { display: flex; gap: 8px; margin-bottom: 12px; }
+.manage-options-add input { flex: 1; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-size: 13.5px; }
+.manage-options-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; border-bottom: 1px solid var(--color-border-soft);
+}
+.manage-options-item input { flex: 1; padding: 6px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-size: 13px; }
+.manage-options-item.inactive { opacity: 0.5; }

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>งานผสมเคมีบำบัดเฉพาะราย — SmartCtx</title>
+<link rel="stylesheet" href="/core/css/theme.css">
+</head>
+<body>
+<header class="app-header">
+    <div class="header-top-row">
+        <div><h1>🧪 งานผสมเคมีบำบัดเฉพาะราย <span class="app-version">SmartCtx V.1.0.0</span></h1></div>
+        <div><span class="user-chip" id="userChip">👤 —</span><button class="logout-btn" onclick="logout()">🚪 ออกจากระบบ</button></div>
+    </div>
+</header>
+<main class="main-container">
+    <div class="card"><div class="card-body" style="text-align:center; padding:60px 20px;">
+        <p style="font-size:15px; color:var(--color-ink-muted);">โมดูลนี้อยู่ระหว่างการพัฒนา — จะเปิดใช้งานในเฟสถัดไป</p>
+        <a href="/" style="display:inline-block; margin-top:16px;">← กลับหน้าเลือกโมดูล</a>
+    </div></div>
+</main>
+<script>window.SMARTCTX_MODULE = 'chemo-prep';</script>
+<script src="/core/js/shared/sessionTimeout.shared.js"></script>
+<script>
+async function logout() {
+    try { await fetch('/modules/chemo-prep/api/auth/logout', { method: 'POST' }); } catch (e) {}
+    finally { window.location.href = '/modules/chemo-prep/login.html'; }
+}
+fetch('/modules/chemo-prep/api/auth/status').then(r => r.json()).then(d => {
+    if (d.authenticated) document.getElementById('userChip').textContent = '👤 ' + d.username;
+});
+</script>
+</body>
+</html>

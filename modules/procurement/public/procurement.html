@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>งานจัดซื้อ — SmartCtx</title>
+<link rel="stylesheet" href="/core/css/theme.css">
+<link rel="stylesheet" href="/modules/procurement/css/procurement.css">
+</head>
+<body>
+
+<header class="app-header">
+    <div class="header-top-row">
+        <div>
+            <h1>🛒 งานจัดซื้อ <span class="app-version">SmartCtx V.1.0.0</span></h1>
+            <p class="subtitle">รับใบเบิกจากงานคลังเคมีบำบัด และบันทึกการจัดส่ง (จัดส่งไม่ครบได้ ระบบเก็บยอดค้างไว้อัตโนมัติ)</p>
+        </div>
+        <div>
+            <span class="user-chip" id="userChip">👤 —</span>
+            <button class="logout-btn" onclick="logout()">🚪 ออกจากระบบ</button>
+        </div>
+    </div>
+</header>
+
+<main class="main-container">
+
+    <div class="kpi-row">
+        <div class="kpi-card"><span>📋 ใบเบิกทั้งหมด</span><strong id="kpiTotal">—</strong></div>
+        <div class="kpi-card warn"><span>⏳ ยังไม่ได้จัดส่ง</span><strong id="kpiNotShipped">—</strong></div>
+        <div class="kpi-card"><span>🚚 จัดส่งบางส่วน</span><strong id="kpiPartial">—</strong></div>
+        <div class="kpi-card"><span>✅ จัดส่งครบแล้ว</span><strong id="kpiShipped">—</strong></div>
+    </div>
+
+    <div class="tab-bar" id="tabBar">
+        <button class="tab-btn active" data-tab="pending">📤 ใบเบิกที่ต้องจัดส่ง</button>
+        <button class="tab-btn" data-tab="history">🕘 ประวัติการจัดส่ง</button>
+    </div>
+
+    <section class="tab-panel active" id="tab-pending">
+        <div class="card">
+            <div class="card-header">
+                <h2>รายการใบเบิกทั้งหมด</h2>
+                <div style="display:flex; gap:8px;">
+                    <input type="text" id="reqSearch" placeholder="ค้นหาเลขที่ใบเบิก..." oninput="renderRequisitionList()" style="max-width:200px;">
+                    <select id="shipStatusFilter" onchange="renderRequisitionList()">
+                        <option value="">ทุกสถานะ</option>
+                        <option value="not_shipped">ยังไม่ได้จัดส่ง</option>
+                        <option value="partially_shipped">จัดส่งบางส่วน</option>
+                        <option value="shipped">จัดส่งครบแล้ว</option>
+                    </select>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead><tr><th>เลขที่ใบเบิก</th><th>วันที่</th><th>ผู้เบิก</th><th>จำนวนรายการ</th><th>สถานะจัดส่ง</th><th>สถานะรับเข้า</th><th></th></tr></thead>
+                        <tbody id="requisitionBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="tab-panel" id="tab-history">
+        <div class="card">
+            <div class="card-header"><h2>ประวัติการจัดส่งล่าสุด</h2></div>
+            <div class="card-body">
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead><tr><th>เลขที่จัดส่ง</th><th>วันที่</th><th>อ้างอิงใบเบิก</th><th>รายการที่จัดส่ง</th><th>ผู้จัดส่ง</th><th>หมายเหตุ</th></tr></thead>
+                        <tbody id="shipmentHistoryBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
+
+</main>
+
+<div id="report-preview-modal" class="report-preview-modal">
+    <div class="report-preview-body"><iframe id="report-preview-frame"></iframe></div>
+    <div class="report-preview-actions">
+        <button onclick="printReportPreview()">🖨️ พิมพ์ / บันทึก PDF</button>
+        <button onclick="closeReportPreview()">ปิด</button>
+    </div>
+</div>
+<div id="direct-print-container" class="direct-print-container"></div>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<script>window.SMARTCTX_MODULE = 'procurement';</script>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/core/js/shared/thaiDate.shared.js"></script>
+<script src="/core/js/shared/printPreview.shared.js"></script>
+<script src="/core/js/shared/sessionTimeout.shared.js"></script>
+<script src="/modules/procurement/js/pages/procurement.page.js"></script>
+</body>
+</html>

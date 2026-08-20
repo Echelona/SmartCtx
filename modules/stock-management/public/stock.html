@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>งานคลังเคมีบำบัด — SmartCtx</title>
+<link rel="stylesheet" href="/core/css/theme.css">
+<link rel="stylesheet" href="/modules/stock-management/css/stock.css">
+</head>
+<body>
+
+<header class="app-header">
+    <div class="header-top-row">
+        <div>
+            <h1>📦 งานคลังเคมีบำบัด <span class="app-version">SmartCtx V.1.0.0</span></h1>
+            <p class="subtitle">สร้างรายการจัดซื้อ รับเข้าคลังตามใบส่งของ ติดตามยอดค้างจ่าย และดูสต๊อกคงเหลือ</p>
+        </div>
+        <div>
+            <span class="user-chip" id="userChip">👤 —</span>
+            <button class="logout-btn" onclick="logout()">🚪 ออกจากระบบ</button>
+        </div>
+    </div>
+</header>
+
+<main class="main-container">
+
+    <div class="kpi-row">
+        <div class="kpi-card"><span>💊 ชนิดยาที่มีสต๊อก</span><strong id="kpiDrugCount">—</strong></div>
+        <div class="kpi-card warn"><span>⏳ ใกล้หมดอายุ (≤90 วัน)</span><strong id="kpiNearExpiry">—</strong></div>
+        <div class="kpi-card"><span>📥 ใบเบิกค้างรับ</span><strong id="kpiPendingReq">—</strong></div>
+        <div class="kpi-card"><span>🔴 รายการค้างจ่าย</span><strong id="kpiBackorder">—</strong></div>
+        <div class="kpi-card"><span>💰 มูลค่าคงคลังรวม</span><strong id="kpiTotalValue">—</strong></div>
+    </div>
+
+    <div class="tab-bar" id="tabBar">
+        <button class="tab-btn active" data-tab="requisitions">📋 ใบเบิก / รายการจัดซื้อ</button>
+        <button class="tab-btn" data-tab="receipts">📥 รับเข้าคลัง</button>
+        <button class="tab-btn" data-tab="stock">📦 คลังคงเหลือ</button>
+        <button class="tab-btn" data-tab="backorders">🔴 ค้างจ่าย</button>
+        <button class="tab-btn" data-tab="movements">🕘 ความเคลื่อนไหว</button>
+        <button class="tab-btn" data-tab="drugs">💊 รายการยา</button>
+        <button class="tab-btn tab-btn-danger" data-tab="danger">🧹 ข้อมูลทดสอบ</button>
+    </div>
+
+    <!-- TAB: ใบเบิก -->
+    <section class="tab-panel active" id="tab-requisitions">
+        <div class="card">
+            <div class="card-header"><h2>สร้างใบเบิก (รายการจัดซื้อ)</h2></div>
+            <div class="card-body">
+                <div style="display:flex; gap:16px; margin-bottom:12px; flex-wrap:wrap;">
+                    <div class="form-group"><label>วันที่:</label><input type="text" id="reqDate"></div>
+                    <div class="form-group" style="flex:1; min-width:180px;"><label>ชื่อผู้เบิก: <span class="required-mark">*</span></label><input type="text" id="reqRequester" placeholder="ชื่อ-นามสกุลผู้เบิกจริง" required></div>
+                    <div class="form-group" style="flex:1; min-width:200px;"><label>หมายเหตุ:</label><input type="text" id="reqNote" placeholder="ไม่บังคับ"></div>
+                </div>
+
+                <div class="cart-picker">
+                    <div class="form-group" style="flex:2;"><label>เลือกยา</label><select id="reqPickDrug" onchange="onReqPickDrugChange()"><option value="">-- เลือกยา --</option></select></div>
+                    <div class="form-group"><label>ความแรง</label><span id="reqPickStrength" class="text-faint">-</span></div>
+                    <div class="form-group"><label>ขนาดบรรจุ</label><span id="reqPickPack" class="text-faint">-</span></div>
+                    <div class="form-group"><label>จำนวน</label><input type="number" min="1" step="1" id="reqPickQty"></div>
+                    <button type="button" class="btn-primary" onclick="addToReqCart()">+ เพิ่มลงตะกร้า</button>
+                </div>
+
+                <div class="cart-table">
+                    <table class="data-table">
+                        <thead><tr><th>ยา</th><th>ความแรง</th><th>ขนาดบรรจุ</th><th>จำนวน</th><th></th></tr></thead>
+                        <tbody id="reqCartBody"><tr><td colspan="5" class="table-empty">ยังไม่มีรายการในตะกร้า</td></tr></tbody>
+                    </table>
+                </div>
+
+                <div class="action-bar align-left" style="margin-top:14px;">
+                    <button class="btn-primary" onclick="submitRequisition()">✅ บันทึกใบเบิก</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>รายการใบเบิกทั้งหมด</h2>
+                <select id="reqStatusFilter" onchange="loadRequisitions()">
+                    <option value="">ทุกสถานะ</option>
+                    <option value="pending">รอรับเข้า</option>
+                    <option value="partially_received">รับบางส่วน</option>
+                    <option value="received">รับครบแล้ว</option>
+                    <option value="cancelled">ยกเลิก</option>
+                </select>
+            </div>
+            <div class="card-body">
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead><tr><th>เลขที่ใบเบิก</th><th>วันที่</th><th>ผู้เบิก</th><th>จำนวนรายการ</th><th>สถานะจัดส่ง</th><th>สถานะรับเข้า</th><th></th></tr></thead>
+                        <tbody id="requisitionBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- TAB: รับเข้าคลัง -->
+    <section class="tab-panel" id="tab-receipts">
+        <div class="card">
+            <div class="card-header"><h2>บันทึกรับเข้าคลัง</h2></div>
+            <div class="card-body">
+                <div style="display:flex; gap:16px; margin-bottom:12px; flex-wrap:wrap;">
+                    <div class="form-group"><label>วันที่รับเข้า:</label><input type="text" id="receiptDate"></div>
+                    <div class="form-group" style="flex:1; min-width:180px;"><label>ชื่อผู้รับ: <span class="required-mark">*</span></label><input type="text" id="receiptReceiver" placeholder="ชื่อ-นามสกุลผู้รับจริง" required></div>
+                    <div class="form-group" style="flex:1; min-width:220px;">
+                        <label>อ้างอิงใบเบิก (ถ้ามี):</label>
+                        <select id="receiptReqSelect" onchange="onReceiptReqSelected()"><option value="">-- รับเข้าโดยไม่อ้างอิงใบเบิก --</option></select>
+                    </div>
+                    <div class="form-group" style="flex:1; min-width:200px;"><label>หมายเหตุ:</label><input type="text" id="receiptNote" placeholder="เช่น เลขที่ใบส่งของ"></div>
+                </div>
+
+                <div class="cart-picker receipt-picker">
+                    <div class="form-group" style="flex:1.6;"><label>เลือกยา</label><select id="rcvPickDrug"><option value="">-- เลือกยา --</option></select></div>
+                    <div class="form-group"><label>Lot No.</label><input type="text" id="rcvPickLot"></div>
+                    <div class="form-group"><label>วันผลิต</label><input type="text" id="rcvPickMfg"></div>
+                    <div class="form-group"><label>วันหมดอายุ</label><input type="text" id="rcvPickExp"></div>
+                    <div class="form-group"><label>จำนวน</label><input type="number" min="1" step="1" id="rcvPickQty"></div>
+                    <div class="form-group"><label>ราคา/หน่วย</label><input type="number" min="0" step="0.01" id="rcvPickCost"></div>
+                    <button type="button" class="btn-primary" onclick="addToReceiptCart()">+ เพิ่มลงตะกร้า</button>
+                </div>
+
+                <div class="cart-table">
+                    <table class="data-table">
+                        <thead><tr><th>ยา</th><th>Lot No.</th><th>วันผลิต</th><th>วันหมดอายุ</th><th>จำนวน</th><th>ราคา/หน่วย</th><th></th></tr></thead>
+                        <tbody id="receiptCartBody"><tr><td colspan="7" class="table-empty">ยังไม่มีรายการในตะกร้า</td></tr></tbody>
+                    </table>
+                </div>
+
+                <div class="action-bar align-left" style="margin-top:14px;">
+                    <button class="btn-primary" onclick="submitReceipt()">✅ บันทึกรับเข้าคลัง</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><h2>ประวัติการรับเข้าคลัง</h2></div>
+            <div class="card-body">
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead><tr><th>เลขที่รับเข้า</th><th>วันที่</th><th>ผู้รับ</th><th>จำนวนรายการ</th></tr></thead>
+                        <tbody id="receiptBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- TAB: คลังคงเหลือ -->
+    <section class="tab-panel" id="tab-stock">
+        <div class="card">
+            <div class="card-header">
+                <h2>สต๊อกคงเหลือ</h2>
+                <input type="text" id="stockSearch" placeholder="ค้นหาชื่อยา..." oninput="renderStockSummary()" style="max-width:220px;">
+            </div>
+            <div class="card-body">
+                <p class="text-faint" style="font-size:12.5px; margin-bottom:10px;">คลิกชื่อยาเพื่อดูรายละเอียดแยกตาม Lot (จำนวน, ต้นทุน, วันหมดอายุ)</p>
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead><tr><th>ยา</th><th>ความแรง</th><th>คงเหลือ</th><th>หน่วย</th><th>จำนวน Lot</th><th>ใกล้หมดอายุสุด</th><th>ค้างหมดอายุ</th><th>มูลค่ารวม</th></tr></thead>
+                        <tbody id="stockSummaryBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- TAB: ค้างจ่าย -->
+    <section class="tab-panel" id="tab-backorders">
+        <div class="card">
+            <div class="card-header"><h2>รายการค้างจ่าย (เบิกไปแล้วแต่ยังรับไม่ครบ)</h2></div>
+            <div class="card-body">
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead><tr><th>เลขที่ใบเบิก</th><th>วันที่เบิก</th><th>ยา</th><th>เบิก</th><th>รับแล้ว</th><th>ค้างจ่าย</th></tr></thead>
+                        <tbody id="backorderBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- TAB: ความเคลื่อนไหว -->
+    <section class="tab-panel" id="tab-movements">
+        <div class="card">
+            <div class="card-header"><h2>ประวัติความเคลื่อนไหวสต๊อก</h2></div>
+            <div class="card-body">
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead><tr><th>วันเวลา</th><th>ประเภท</th><th>ยา</th><th>Lot</th><th>เปลี่ยนแปลง</th><th>คงเหลือหลังรายการ</th><th>หมายเหตุ</th></tr></thead>
+                        <tbody id="movementsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- TAB: รายการยา (Drug Master) -->
+    <section class="tab-panel" id="tab-drugs">
+        <div class="card">
+            <div class="card-header">
+                <h2>รายการยาอ้างอิง (Item / ความแรง / ขนาดบรรจุ)</h2>
+                <button class="btn-primary btn-sm" onclick="openAddDrug()">+ เพิ่มรายการยา</button>
+            </div>
+            <div class="card-body">
+                <div class="add-drug-form" id="add-drug-form">
+                    <h3 id="drug-form-title">เพิ่มรายการยา</h3>
+                    <div class="drug-form-grid">
+                        <div class="form-group"><label>รหัสยา (Code)</label><input type="text" id="d-code" placeholder="เช่น CISPLATIN-50"></div>
+                        <div class="form-group"><label>ชื่อยา (Item)</label><input type="text" id="d-name" placeholder="เช่น Cisplatin"></div>
+                        <div class="form-group"><label>ค่าความแรง (ตัวเลข)</label><input type="number" step="any" id="d-strength-value" placeholder="เช่น 50" onchange="updateStrengthPreview()"></div>
+                        <div class="form-group">
+                            <label>หน่วยความแรง</label>
+                            <select id="d-strength-unit" onchange="onLookupSelectChange('d-strength-unit', 'strength_unit')"></select>
+                        </div>
+                        <div class="form-group"><label>ตัวอย่างที่จะแสดง</label><span id="d-strength-preview" class="text-faint">-</span></div>
+                        <div class="form-group"><label>ค่าขนาดบรรจุ (ตัวเลข)</label><input type="number" step="any" id="d-pack-value" placeholder="เช่น 50" onchange="updatePackSizePreview()"></div>
+                        <div class="form-group">
+                            <label>หน่วยขนาดบรรจุ</label>
+                            <select id="d-pack-unit" onchange="onLookupSelectChange('d-pack-unit', 'pack_size_unit')"></select>
+                        </div>
+                        <div class="form-group"><label>ตัวอย่างที่จะแสดง</label><span id="d-pack-preview" class="text-faint">-</span></div>
+                        <div class="form-group">
+                            <label>หมวดหมู่</label>
+                            <select id="d-category" onchange="onLookupSelectChange('d-category', 'category')"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>หน่วย</label>
+                            <select id="d-unit" onchange="onLookupSelectChange('d-unit', 'unit')"></select>
+                        </div>
+                        <div class="form-group"><label>ราคาต่อหน่วย (ถ้ามี)</label><input type="number" step="0.01" id="d-cost"></div>
+                    </div>
+                    <div class="action-bar align-left" style="margin-top:12px;">
+                        <button class="btn-primary" onclick="saveDrug()">💾 บันทึก</button>
+                        <button class="btn-outline" onclick="closeAddDrug()">ยกเลิก</button>
+                        <button class="btn-outline" onclick="openManageOptions()">⚙️ จัดการตัวเลือก</button>
+                    </div>
+                </div>
+
+                <div class="manage-options-panel" id="manage-options-panel">
+                    <div class="manage-options-header">
+                        <h3>⚙️ จัดการตัวเลือก dropdown</h3>
+                        <button class="btn-outline btn-sm" onclick="closeManageOptions()">ปิด</button>
+                    </div>
+                    <div class="manage-options-tabs" id="manage-options-tabs">
+                        <button class="tab-btn active" data-list-type="unit">หน่วย</button>
+                        <button class="tab-btn" data-list-type="pack_size_unit">หน่วยขนาดบรรจุ</button>
+                        <button class="tab-btn" data-list-type="strength_unit">หน่วยความแรง</button>
+                        <button class="tab-btn" data-list-type="category">หมวดหมู่</button>
+                    </div>
+                    <div class="manage-options-add">
+                        <input type="text" id="manage-options-new-value" placeholder="เพิ่มตัวเลือกใหม่...">
+                        <button class="btn-primary btn-sm" onclick="addManageOption()">+ เพิ่ม</button>
+                    </div>
+                    <div id="manage-options-list"></div>
+                </div>
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead><tr><th>รหัสยา</th><th>ชื่อยา</th><th>ความแรง</th><th>ขนาดบรรจุ</th><th>หมวดหมู่</th><th>หน่วย</th><th>สถานะ</th><th></th></tr></thead>
+                        <tbody id="drugBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- TAB: ล้างข้อมูลทดสอบ (Danger Zone — ใช้เฉพาะช่วงทดสอบระบบ) -->
+    <section class="tab-panel" id="tab-danger">
+        <div class="card danger-zone">
+            <div class="card-header"><h2>🧹 ล้างประวัติการทำรายการทั้งหมด</h2></div>
+            <div class="card-body">
+                <p class="danger-warning">
+                    ⚠️ การกดปุ่มนี้จะ<strong>ลบข้อมูลใบเบิก, การจัดส่ง, การรับเข้าคลัง, สต๊อกคงเหลือ, ประวัติความเคลื่อนไหว
+                    และการปรับปรุงยอดทั้งหมดถาวร กู้คืนไม่ได้</strong> — ใช้เฉพาะช่วงทดสอบระบบเท่านั้น
+                    ห้ามใช้กับข้อมูลจริงเด็ดขาด (รายการยา/Drug Master จะไม่ถูกลบ)
+                </p>
+                <div class="form-group" style="max-width:320px;">
+                    <label>รหัสผ่านยืนยัน (แยกจาก login ปกติ):</label>
+                    <input type="password" id="clearPassword" placeholder="กรอกรหัสผ่านเพื่อยืนยัน">
+                </div>
+                <button class="btn-danger" onclick="clearTestData()">🗑️ ล้างข้อมูลทั้งหมดถาวร</button>
+            </div>
+        </div>
+    </section>
+
+</main>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<script>window.SMARTCTX_MODULE = 'stock-management';</script>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/core/js/shared/thaiDate.shared.js"></script>
+<script src="/core/js/shared/sessionTimeout.shared.js"></script>
+<script src="/modules/stock-management/js/pages/stock.page.js"></script>
+</body>
+</html>

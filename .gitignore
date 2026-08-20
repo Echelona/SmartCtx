@@ -1,0 +1,23 @@
+# ห้าม commit — มีรหัสผ่านจริง/session secret อยู่ข้างใน
+.env
+.env.local
+.env.*.local
+
+# ติดตั้งใหม่ด้วย npm install ได้เสมอ ไม่ต้อง commit
+node_modules/
+
+# ฐานข้อมูล SQLite จริง — เป็นข้อมูลของแต่ละเครื่อง ไม่ใช่โค้ด ไม่ควร commit
+# (โครงสร้างตารางถูกสร้าง/migrate อัตโนมัติตอน server เริ่มทำงานอยู่แล้ว)
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+
+# log ไฟล์ที่ pm2/node อาจสร้างไว้ระหว่างรัน
+*.log
+logs/
+
+# ไฟล์ระบบปฏิบัติการ/editor ทั่วไป
+.DS_Store
+Thumbs.db
+.vscode/
