@@ -76,7 +76,7 @@
 
         <div class="card">
             <div class="card-header">
-                <h2>รายการใบเบิกทั้งหมด</h2>
+                <h2>ประวัติการจัดส่ง / รายการใบเบิกทั้งหมด</h2>
                 <select id="reqStatusFilter" onchange="loadRequisitions()">
                     <option value="">ทุกสถานะ</option>
                     <option value="pending">รอรับเข้า</option>
@@ -86,6 +86,13 @@
                 </select>
             </div>
             <div class="card-body">
+                <div class="history-filter-bar">
+                    <div class="form-group"><label>วันที่เบิก (จาก):</label><input type="text" id="reqHistFrom" onchange="loadRequisitions()"></div>
+                    <div class="form-group"><label>ถึง:</label><input type="text" id="reqHistTo" onchange="loadRequisitions()"></div>
+                    <div class="form-group" style="flex:1; min-width:160px;"><label>เลขที่ใบเบิก:</label><input type="text" id="reqHistNoFilter" placeholder="ค้นหาเลขที่ใบเบิก..." oninput="debouncedLoadRequisitions()"></div>
+                    <button type="button" class="btn-outline btn-sm" onclick="resetRequisitionHistoryFilter()">ล้างตัวกรอง</button>
+                </div>
+                <p class="text-faint" style="font-size:12.5px; margin-bottom:10px;">คลิกเลขที่ใบเบิกเพื่อดูรายการยาในใบเบิกนั้น</p>
                 <div class="table-scroll">
                     <table class="data-table">
                         <thead><tr><th>เลขที่ใบเบิก</th><th>วันที่</th><th>ผู้เบิก</th><th>จำนวนรายการ</th><th>สถานะจัดส่ง</th><th>สถานะรับเข้า</th><th></th></tr></thead>
@@ -135,11 +142,18 @@
         </div>
 
         <div class="card">
-            <div class="card-header"><h2>ประวัติการรับเข้าคลัง</h2></div>
+            <div class="card-header"><h2>ประวัติการรับ</h2></div>
             <div class="card-body">
+                <div class="history-filter-bar">
+                    <div class="form-group"><label>วันที่รับเข้า (จาก):</label><input type="text" id="rcvHistFrom" onchange="loadReceipts()"></div>
+                    <div class="form-group"><label>ถึง:</label><input type="text" id="rcvHistTo" onchange="loadReceipts()"></div>
+                    <div class="form-group" style="flex:1; min-width:160px;"><label>เลขที่ใบเบิกอ้างอิง:</label><input type="text" id="rcvHistReqNo" placeholder="ค้นหาเลขที่ใบเบิก..." oninput="debouncedLoadReceipts()"></div>
+                    <button type="button" class="btn-outline btn-sm" onclick="resetReceiptHistoryFilter()">ล้างตัวกรอง</button>
+                </div>
+                <p class="text-faint" style="font-size:12.5px; margin-bottom:10px;">คลิกเลขที่รับเข้าเพื่อดูรายการยาในใบรับเข้านั้น</p>
                 <div class="table-scroll">
                     <table class="data-table">
-                        <thead><tr><th>เลขที่รับเข้า</th><th>วันที่</th><th>ผู้รับ</th><th>จำนวนรายการ</th></tr></thead>
+                        <thead><tr><th>เลขที่รับเข้า</th><th>วันที่</th><th>ผู้รับ</th><th>เลขที่ใบเบิกอ้างอิง</th><th>จำนวนรายการ</th></tr></thead>
                         <tbody id="receiptBody"></tbody>
                     </table>
                 </div>
@@ -186,6 +200,11 @@
         <div class="card">
             <div class="card-header"><h2>ประวัติความเคลื่อนไหวสต๊อก</h2></div>
             <div class="card-body">
+                <div class="history-filter-bar">
+                    <div class="form-group"><label>วันที่ (จาก):</label><input type="text" id="movHistFrom" onchange="loadMovements()"></div>
+                    <div class="form-group"><label>ถึง:</label><input type="text" id="movHistTo" onchange="loadMovements()"></div>
+                    <button type="button" class="btn-outline btn-sm" onclick="resetMovementsHistoryFilter()">ล้างตัวกรอง</button>
+                </div>
                 <div class="table-scroll">
                     <table class="data-table">
                         <thead><tr><th>วันเวลา</th><th>ประเภท</th><th>ยา</th><th>Lot</th><th>เปลี่ยนแปลง</th><th>คงเหลือหลังรายการ</th><th>หมายเหตุ</th></tr></thead>

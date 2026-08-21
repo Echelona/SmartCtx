@@ -1,5 +1,5 @@
 /* procurement.css — เฉพาะหน้างานจัดซื้อ */
-
+ 
 .ship-form { padding: 16px 20px; }
 .ship-form-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px; }
 .ship-item-row {
@@ -17,3 +17,46 @@
 .select-all-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--color-ink-muted); margin-bottom: 10px; }
 .action-bar { display: flex; gap: 10px; }
 .action-bar.align-left { justify-content: flex-start; }
+ 
+/* ตัวกรองประวัติ (ช่วงวันที่ + เลขที่ใบเบิก) — เรียงแนวนอน เหมือนกับ .history-filter-bar ใน stock.css (1.2) */
+.history-filter-bar {
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+.history-filter-bar .form-group { min-width: 130px; }
+.history-filter-bar input { width: 100%; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-size: 13.5px; }
+.history-filter-bar .btn-sm { align-self: center; }
+.history-filter-bar input.input-error { border-color: var(--color-danger-text); background: var(--color-danger-bg); }
+ 
+/* รายการยาที่จัดส่ง ในแถวขยายของประวัติการจัดส่ง — เรียงเป็น chip แนวนอน (ตอบสนอง toggleShipmentHistoryDetail ใน procurement.page.js) */
+.ship-history-items-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.ship-history-item-chip {
+    background: var(--color-primary-lighter);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: 6px 12px;
+    font-size: 13px;
+    white-space: nowrap;
+}
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

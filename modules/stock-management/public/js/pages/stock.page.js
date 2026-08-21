@@ -26,6 +26,45 @@ function formatNumber(n) {
 function formatCurrency(n) { return !n ? '0 บาท' : Number(n).toLocaleString('th-TH', { maximumFractionDigits: 0 }) + ' บาท'; }
 function todayIso() { return new Date().toISOString().slice(0, 10); }
 
+// ตรวจสอบช่วงวันที่ (from/to) ก่อนยิง query ทุกครั้ง — ใช้ร่วมกันทั้งตัวกรองประวัติการจัดส่งและประวัติการรับ
+// คืนค่าข้อความ error ถ้าช่วงกลับด้าน (จาก > ถึง) แล้วเน้นกรอบสีแดงให้ผู้ใช้เห็นทันที มิเช่นนั้นคืน null และล้างสถานะ error
+function validateDateRangeInputs(fromEl, toEl) {
+    fromEl.classList.remove('input-error');
+    toEl.classList.remove('input-error');
+    const from = getDateValue(fromEl);
+    const to = getDateValue(toEl);
+    if (from && to && from > to) {
+        fromEl.classList.add('input-error');
+        toEl.classList.add('input-error');
+        return 'ช่วงวันที่ไม่ถูกต้อง: วันที่ "จาก" ต้องไม่เกินวันที่ "ถึง"';
+    }
+    return null;
+}
+
+// ตรวจสอบวันผลิต/วันหมดอายุ — ใช้ระบบเดียวกับ validateDateRangeInputs ด้านบน (เคลียร์/เติม .input-error แล้วคืนข้อความ error
+// ตัวแรกที่พบ หรือ null ถ้าไม่มีปัญหา) เพื่อให้ทั้งช่วงค้นหาประวัติการรับและวันผลิต-หมดอายุ highlight ช่องผิดแบบเดียวกัน
+function validateMfgExpDateInputs(mfgEl, expEl) {
+    mfgEl.classList.remove('input-error');
+    expEl.classList.remove('input-error');
+    const mfg = getDateValue(mfgEl);
+    const exp = getDateValue(expEl);
+    const today = todayIso();
+    if (mfg && mfg > today) {
+        mfgEl.classList.add('input-error');
+        return 'วันผลิตเป็นวันที่ในอนาคต ไม่ถูกต้อง';
+    }
+    if (exp && exp < today) {
+        expEl.classList.add('input-error');
+        return 'วันหมดอายุหมดไปแล้ว ไม่สามารถรับเข้าคลังได้';
+    }
+    if (mfg && exp && exp <= mfg) {
+        mfgEl.classList.add('input-error');
+        expEl.classList.add('input-error');
+        return 'วันหมดอายุต้องอยู่หลังวันผลิต';
+    }
+    return null;
+}
+
 async function apiGet(url) {
     const res = await fetch(API_BASE + url);
     const data = await res.json().catch(() => ({}));
@@ -169,23 +208,100 @@ async function submitRequisition() {
     } catch (err) { showToast(err.message, 'error'); }
 }
 
+// เก็บผลลัพธ์ล่าสุดไว้ใช้ตอนขยายแถวดูรายละเอียด (กันเรียก API ซ้ำเวลากดยกเลิกใบเบิกแล้ว list เปลี่ยน id ไม่ตรง idx เดิม)
+let requisitionHistoryCache = [];
+let openReqHistIdx = null;
+
+function requisitionHistoryQuery() {
+    const status = document.getElementById('reqStatusFilter').value;
+    const from = getDateValue(document.getElementById('reqHistFrom'));
+    const to = getDateValue(document.getElementById('reqHistTo'));
+    const reqNo = document.getElementById('reqHistNoFilter').value.trim();
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    if (reqNo) params.set('reqNo', reqNo);
+    const qs = params.toString();
+    return qs ? `?${qs}` : '';
+}
+
 async function loadRequisitions() {
+    const rangeError = validateDateRangeInputs(document.getElementById('reqHistFrom'), document.getElementById('reqHistTo'));
+    if (rangeError) {
+        showToast(rangeError, 'error');
+        document.getElementById('requisitionBody').innerHTML = `<tr><td colspan="7" class="table-empty text-danger">${escapeHtml(rangeError)}</td></tr>`;
+        return;
+    }
     try {
-        const status = document.getElementById('reqStatusFilter').value;
-        const rows = await apiGet(`/requisitions${status ? '?status=' + status : ''}`);
+        const rows = await apiGet(`/requisitions${requisitionHistoryQuery()}`);
+        requisitionHistoryCache = rows;
+        openReqHistIdx = null;
         const tbody = document.getElementById('requisitionBody');
-        if (!rows.length) { tbody.innerHTML = `<tr><td colspan="7" class="table-empty">ยังไม่มีใบเบิก</td></tr>`; return; }
-        tbody.innerHTML = rows.map(r => `
+        if (!rows.length) { tbody.innerHTML = `<tr><td colspan="7" class="table-empty">ไม่พบใบเบิกตามเงื่อนไขที่ค้นหา</td></tr>`; return; }
+        tbody.innerHTML = rows.map((r, idx) => `
             <tr>
-                <td><strong>${escapeHtml(r.req_no)}</strong></td>
+                <td><a class="expand-toggle" onclick="toggleRequisitionHistoryDetail(${r.id}, ${idx})"><strong>${escapeHtml(r.req_no)}</strong></a></td>
                 <td>${escapeHtml(formatDateDisplay(r.req_date))}</td>
                 <td>${escapeHtml(r.requested_by || '-')}</td>
                 <td>${formatNumber(r.itemCount)}</td>
                 <td><span class="status-pill ${shipStatusClass(r.shipStatus)}">${shipStatusLabel(r.shipStatus)}</span></td>
                 <td><span class="status-pill ${r.status}">${statusLabel(r.status)}</span></td>
                 <td>${r.status === 'pending' ? `<button class="btn-outline btn-sm" onclick="cancelRequisition(${r.id})">ยกเลิก</button>` : ''}</td>
-            </tr>`).join('');
+            </tr>
+            <tr class="expand-row" id="reqHistDetail-${idx}" style="display:none;"><td colspan="7"></td></tr>`).join('');
     } catch (err) { showToast(err.message, 'error'); }
+}
+let debouncedLoadRequisitionsTimer = null;
+function debouncedLoadRequisitions() {
+    clearTimeout(debouncedLoadRequisitionsTimer);
+    debouncedLoadRequisitionsTimer = setTimeout(loadRequisitions, 350);
+}
+function resetRequisitionHistoryFilter() {
+    document.getElementById('reqStatusFilter').value = '';
+    setDateValue(document.getElementById('reqHistFrom'), todayIso());
+    setDateValue(document.getElementById('reqHistTo'), todayIso());
+    document.getElementById('reqHistNoFilter').value = '';
+    loadRequisitions();
+}
+
+// ขยายแถวดูรายการยาในใบเบิกนั้น (ยา / ความแรง / เบิก / จัดส่งแล้ว / รับแล้ว / ค้างจ่าย)
+async function toggleRequisitionHistoryDetail(id, idx) {
+    const row = document.getElementById(`reqHistDetail-${idx}`);
+    if (!row) return;
+    if (openReqHistIdx === idx) { row.style.display = 'none'; openReqHistIdx = null; return; }
+    document.querySelectorAll('#requisitionBody .expand-row').forEach(r => r.style.display = 'none');
+    openReqHistIdx = idx;
+
+    row.querySelector('td').innerHTML = `<div class="expand-content">กำลังโหลด...</div>`;
+    row.style.display = 'table-row';
+    try {
+        const detail = await apiGet(`/requisitions/${id}`);
+        if (!detail.items.length) {
+            row.querySelector('td').innerHTML = `<div class="expand-content text-faint">ไม่มีรายการยาในใบเบิกนี้</div>`;
+            return;
+        }
+        const itemRows = detail.items.map(it => `
+            <tr>
+                <td>${escapeHtml(it.drug_name)}</td>
+                <td>${escapeHtml(it.strength || '-')}</td>
+                <td style="text-align:right;">${formatNumber(it.qty_requested)}</td>
+                <td style="text-align:right;">${formatNumber(it.qty_shipped)}</td>
+                <td style="text-align:right;">${formatNumber(it.qty_received)}</td>
+                <td style="text-align:right;">${formatNumber(Math.max(0, it.qty_requested - it.qty_received))}</td>
+                <td>${escapeHtml(it.unit || '-')}</td>
+            </tr>`).join('');
+        row.querySelector('td').innerHTML = `
+            <div class="expand-content">
+                ${detail.note ? `<p class="text-faint" style="margin-bottom:8px;">หมายเหตุ: ${escapeHtml(detail.note)}</p>` : ''}
+                <table class="data-table">
+                    <thead><tr><th>ยา</th><th>ความแรง</th><th style="text-align:right;">เบิก</th><th style="text-align:right;">จัดส่งแล้ว</th><th style="text-align:right;">รับแล้ว</th><th style="text-align:right;">ค้างจ่าย</th><th>หน่วย</th></tr></thead>
+                    <tbody>${itemRows}</tbody>
+                </table>
+            </div>`;
+    } catch (err) {
+        row.querySelector('td').innerHTML = `<div class="expand-content text-danger">โหลดรายละเอียดไม่สำเร็จ: ${escapeHtml(err.message)}</div>`;
+    }
 }
 
 async function cancelRequisition(id) {
@@ -214,19 +330,23 @@ function addToReceiptCart() {
     if (!code) { showToast('กรุณาเลือกยา', 'error'); return; }
     if (!lotNo) { showToast('กรุณาระบุ Lot No.', 'error'); return; }
     if (!qty || qty <= 0) { showToast('กรุณาระบุจำนวนที่รับเข้า', 'error'); return; }
+    const mfgPickEl = document.getElementById('rcvPickMfg');
+    const expPickEl = document.getElementById('rcvPickExp');
+    const dateError = validateMfgExpDateInputs(mfgPickEl, expPickEl);
+    if (dateError) { showToast(dateError, 'error'); return; }
     const drug = findDrug(code);
     receiptCart.push({
         drugCode: code, drugName: drug?.name || code, strength: drug?.strength, strengthValue: drug?.strength_value, strengthUnit: drug?.strength_unit, packSize: drug?.pack_size, packSizeValue: drug?.pack_size_value, packSizeUnit: drug?.pack_size_unit, unit: drug?.unit,
         qty, lotNo, sourceReqId: null,
-        mfgDate: getDateValue(document.getElementById('rcvPickMfg')) || '',
-        expDate: getDateValue(document.getElementById('rcvPickExp')) || '',
+        mfgDate: getDateValue(mfgPickEl) || '',
+        expDate: getDateValue(expPickEl) || '',
         unitCost: document.getElementById('rcvPickCost').value || ''
     });
     renderReceiptCart();
     document.getElementById('rcvPickDrug').value = '';
     document.getElementById('rcvPickLot').value = '';
-    setDateValue(document.getElementById('rcvPickMfg'), '');
-    setDateValue(document.getElementById('rcvPickExp'), '');
+    setDateValue(mfgPickEl, '');
+    setDateValue(expPickEl, '');
     document.getElementById('rcvPickQty').value = '';
     document.getElementById('rcvPickCost').value = '';
 }
@@ -256,8 +376,9 @@ function renderReceiptCart() {
         const expEl = document.getElementById(`cartExp-${idx}`);
         initThaiDatePicker(mfgEl); setDateValue(mfgEl, it.mfgDate || '');
         initThaiDatePicker(expEl); setDateValue(expEl, it.expDate || '');
-        mfgEl.addEventListener('change', () => { receiptCart[idx].mfgDate = getDateValue(mfgEl); });
-        expEl.addEventListener('change', () => { receiptCart[idx].expDate = getDateValue(expEl); });
+        validateMfgExpDateInputs(mfgEl, expEl); // ไฮไลต์ทันทีถ้าค่าที่เติมมา (เช่นจากใบเบิก) ผิดอยู่แล้วตั้งแต่ render
+        mfgEl.addEventListener('change', () => { receiptCart[idx].mfgDate = getDateValue(mfgEl); validateMfgExpDateInputs(mfgEl, expEl); });
+        expEl.addEventListener('change', () => { receiptCart[idx].expDate = getDateValue(expEl); validateMfgExpDateInputs(mfgEl, expEl); });
     });
 }
 
@@ -320,11 +441,11 @@ async function submitReceipt() {
 
     // ตรวจวันผลิต/วันหมดอายุฝั่งหน้าเว็บก่อน ให้ผู้ใช้เห็น error ทันทีโดยไม่ต้องรอ round-trip ไป backend
     // (backend ก็ตรวจซ้ำอีกชั้นเป็นตัวบังคับจริง เผื่อมีการยิง API ตรงๆ ข้ามหน้าเว็บ)
-    const today = todayIso();
-    for (const it of receiptCart) {
-        if (it.mfgDate && it.mfgDate > today) { showToast(`${it.drugName}: วันผลิตเป็นวันที่ในอนาคต ไม่ถูกต้อง`, 'error'); return; }
-        if (it.expDate && it.expDate < today) { showToast(`${it.drugName}: วันหมดอายุหมดไปแล้ว ไม่สามารถรับเข้าคลังได้`, 'error'); return; }
-        if (it.mfgDate && it.expDate && it.expDate <= it.mfgDate) { showToast(`${it.drugName}: วันหมดอายุต้องอยู่หลังวันผลิต`, 'error'); return; }
+    for (let idx = 0; idx < receiptCart.length; idx++) {
+        const mfgEl = document.getElementById(`cartMfg-${idx}`);
+        const expEl = document.getElementById(`cartExp-${idx}`);
+        const dateError = validateMfgExpDateInputs(mfgEl, expEl);
+        if (dateError) { showToast(`${receiptCart[idx].drugName}: ${dateError}`, 'error'); return; }
     }
 
     try {
@@ -343,14 +464,91 @@ async function submitReceipt() {
     } catch (err) { showToast(err.message, 'error'); }
 }
 
+let openRcvHistIdx = null;
+
+function receiptHistoryQuery() {
+    const from = getDateValue(document.getElementById('rcvHistFrom'));
+    const to = getDateValue(document.getElementById('rcvHistTo'));
+    const reqNo = document.getElementById('rcvHistReqNo').value.trim();
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    if (reqNo) params.set('reqNo', reqNo);
+    const qs = params.toString();
+    return qs ? `?${qs}` : '';
+}
+
 async function loadReceipts() {
+    const rangeError = validateDateRangeInputs(document.getElementById('rcvHistFrom'), document.getElementById('rcvHistTo'));
+    if (rangeError) {
+        showToast(rangeError, 'error');
+        document.getElementById('receiptBody').innerHTML = `<tr><td colspan="5" class="table-empty text-danger">${escapeHtml(rangeError)}</td></tr>`;
+        return;
+    }
     try {
-        const rows = await apiGet('/receipts');
+        const rows = await apiGet(`/receipts${receiptHistoryQuery()}`);
         const tbody = document.getElementById('receiptBody');
-        if (!rows.length) { tbody.innerHTML = `<tr><td colspan="4" class="table-empty">ยังไม่มีประวัติการรับเข้าคลัง</td></tr>`; return; }
-        tbody.innerHTML = rows.map(r => `
-            <tr><td><strong>${escapeHtml(r.receipt_no)}</strong></td><td>${escapeHtml(formatDateDisplay(r.receipt_date))}</td><td>${escapeHtml(r.received_by || '-')}</td><td>${formatNumber(r.itemCount)}</td></tr>`).join('');
+        openRcvHistIdx = null;
+        if (!rows.length) { tbody.innerHTML = `<tr><td colspan="5" class="table-empty">ไม่พบประวัติการรับเข้าคลังตามเงื่อนไขที่ค้นหา</td></tr>`; return; }
+        tbody.innerHTML = rows.map((r, idx) => `
+            <tr>
+                <td><a class="expand-toggle" onclick="toggleReceiptHistoryDetail(${r.id}, ${idx})"><strong>${escapeHtml(r.receipt_no)}</strong></a></td>
+                <td>${escapeHtml(formatDateDisplay(r.receipt_date))}</td>
+                <td>${escapeHtml(r.received_by || '-')}</td>
+                <td>${escapeHtml(r.source_req_no || '-')}</td>
+                <td>${formatNumber(r.itemCount)}</td>
+            </tr>
+            <tr class="expand-row" id="rcvHistDetail-${idx}" style="display:none;"><td colspan="5"></td></tr>`).join('');
     } catch (err) { showToast(err.message, 'error'); }
+}
+let debouncedLoadReceiptsTimer = null;
+function debouncedLoadReceipts() {
+    clearTimeout(debouncedLoadReceiptsTimer);
+    debouncedLoadReceiptsTimer = setTimeout(loadReceipts, 350);
+}
+function resetReceiptHistoryFilter() {
+    setDateValue(document.getElementById('rcvHistFrom'), todayIso());
+    setDateValue(document.getElementById('rcvHistTo'), todayIso());
+    document.getElementById('rcvHistReqNo').value = '';
+    loadReceipts();
+}
+
+// ขยายแถวดูรายการยาในใบรับเข้านั้น (ยา / Lot / วันผลิต-หมดอายุ / จำนวน / ราคาต่อหน่วย)
+async function toggleReceiptHistoryDetail(id, idx) {
+    const row = document.getElementById(`rcvHistDetail-${idx}`);
+    if (!row) return;
+    if (openRcvHistIdx === idx) { row.style.display = 'none'; openRcvHistIdx = null; return; }
+    document.querySelectorAll('#receiptBody .expand-row').forEach(r => r.style.display = 'none');
+    openRcvHistIdx = idx;
+
+    row.querySelector('td').innerHTML = `<div class="expand-content">กำลังโหลด...</div>`;
+    row.style.display = 'table-row';
+    try {
+        const detail = await apiGet(`/receipts/${id}`);
+        if (!detail.items.length) {
+            row.querySelector('td').innerHTML = `<div class="expand-content text-faint">ไม่มีรายการยาในใบรับเข้านี้</div>`;
+            return;
+        }
+        const itemRows = detail.items.map(it => `
+            <tr>
+                <td>${escapeHtml(it.drug_name)}${it.strength ? ' (' + escapeHtml(it.strength) + ')' : ''}</td>
+                <td>${escapeHtml(it.lot_no || '-')}</td>
+                <td>${escapeHtml(formatDateDisplay(it.mfg_date) || '-')}</td>
+                <td>${escapeHtml(formatDateDisplay(it.exp_date) || '-')}</td>
+                <td style="text-align:right;">${formatNumber(it.qty)} ${escapeHtml(it.unit || '')}</td>
+                <td style="text-align:right;">${it.unit_cost ? formatCurrency(it.unit_cost) : '-'}</td>
+            </tr>`).join('');
+        row.querySelector('td').innerHTML = `
+            <div class="expand-content">
+                ${detail.note ? `<p class="text-faint" style="margin-bottom:8px;">หมายเหตุ: ${escapeHtml(detail.note)}</p>` : ''}
+                <table class="data-table">
+                    <thead><tr><th>ยา</th><th>Lot No.</th><th>วันผลิต</th><th>วันหมดอายุ</th><th style="text-align:right;">จำนวน</th><th style="text-align:right;">ราคา/หน่วย</th></tr></thead>
+                    <tbody>${itemRows}</tbody>
+                </table>
+            </div>`;
+    } catch (err) {
+        row.querySelector('td').innerHTML = `<div class="expand-content text-danger">โหลดรายละเอียดไม่สำเร็จ: ${escapeHtml(err.message)}</div>`;
+    }
 }
 
 // ===================== TAB: คลังคงเหลือ =====================
@@ -457,11 +655,22 @@ async function loadBackorders() {
 
 // ===================== TAB: ความเคลื่อนไหว =====================
 async function loadMovements() {
+    const rangeError = validateDateRangeInputs(document.getElementById('movHistFrom'), document.getElementById('movHistTo'));
+    if (rangeError) {
+        showToast(rangeError, 'error');
+        document.getElementById('movementsBody').innerHTML = `<tr><td colspan="7" class="table-empty text-danger">${escapeHtml(rangeError)}</td></tr>`;
+        return;
+    }
     try {
-        const rows = await apiGet('/movements?limit=100');
+        const from = getDateValue(document.getElementById('movHistFrom'));
+        const to = getDateValue(document.getElementById('movHistTo'));
+        const params = new URLSearchParams({ limit: '100' });
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        const rows = await apiGet(`/movements?${params.toString()}`);
         const tbody = document.getElementById('movementsBody');
         const typeLabel = { RECEIPT: 'รับเข้า', ADJUSTMENT: 'ปรับปรุงยอด' };
-        if (!rows.length) { tbody.innerHTML = `<tr><td colspan="7" class="table-empty">ไม่มีข้อมูล</td></tr>`; return; }
+        if (!rows.length) { tbody.innerHTML = `<tr><td colspan="7" class="table-empty">ไม่พบข้อมูลตามเงื่อนไขที่ค้นหา</td></tr>`; return; }
         tbody.innerHTML = rows.map(m => `
             <tr>
                 <td>${escapeHtml(m.ts)}</td>
@@ -473,6 +682,11 @@ async function loadMovements() {
                 <td>${escapeHtml(m.note || '-')}</td>
             </tr>`).join('');
     } catch (err) { showToast(err.message, 'error'); }
+}
+function resetMovementsHistoryFilter() {
+    setDateValue(document.getElementById('movHistFrom'), '');
+    setDateValue(document.getElementById('movHistTo'), '');
+    loadMovements();
 }
 
 // ===================== TAB: รายการยา (Drug Master) =====================
@@ -773,6 +987,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     initThaiDatePicker(document.getElementById('receiptDate')); setDateValue(document.getElementById('receiptDate'), todayIso());
     initThaiDatePicker(document.getElementById('rcvPickMfg'));
     initThaiDatePicker(document.getElementById('rcvPickExp'));
+    // เช็ควันผลิต/วันหมดอายุทันทีที่เลือก (ไม่ต้องรอกดเพิ่มลงตะกร้า) — ใช้ระบบเดียวกับตัวกรองประวัติการรับด้านล่าง
+    document.getElementById('rcvPickMfg').addEventListener('change', () =>
+        validateMfgExpDateInputs(document.getElementById('rcvPickMfg'), document.getElementById('rcvPickExp')));
+    document.getElementById('rcvPickExp').addEventListener('change', () =>
+        validateMfgExpDateInputs(document.getElementById('rcvPickMfg'), document.getElementById('rcvPickExp')));
+
+    // ตัวกรองประวัติการจัดส่ง/รับ — ค่าเริ่มต้นเป็นวันปัจจุบันทั้งสองช่อง (ผู้ใช้ปรับช่วงวันที่เองได้ภายหลัง)
+    initThaiDatePicker(document.getElementById('reqHistFrom')); setDateValue(document.getElementById('reqHistFrom'), todayIso());
+    initThaiDatePicker(document.getElementById('reqHistTo')); setDateValue(document.getElementById('reqHistTo'), todayIso());
+    initThaiDatePicker(document.getElementById('rcvHistFrom')); setDateValue(document.getElementById('rcvHistFrom'), todayIso());
+    initThaiDatePicker(document.getElementById('rcvHistTo')); setDateValue(document.getElementById('rcvHistTo'), todayIso());
+    // ตัวกรองความเคลื่อนไหว — ไม่ตั้งค่าเริ่มต้นเป็นวันนี้ (ต่างจากประวัติใบเบิก/รับเข้า) เพราะเป็น log ยาวที่มักต้องไล่ดูย้อนหลังทั้งหมด
+    initThaiDatePicker(document.getElementById('movHistFrom'));
+    initThaiDatePicker(document.getElementById('movHistTo'));
 
     await loadLookupOptions(); // ต้องโหลดตัวเลือก dropdown ก่อน loadDrugs() ถึงจะ populate select ในฟอร์มถูกต้อง
     await loadDrugs(); // ต้องโหลดรายการยาก่อน ถึงจะสร้าง dropdown ตัวเลือกในตะกร้าใบเบิก/รับเข้าได้ถูกต้อง

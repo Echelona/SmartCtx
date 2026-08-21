@@ -63,11 +63,18 @@
 
     <section class="tab-panel" id="tab-history">
         <div class="card">
-            <div class="card-header"><h2>ประวัติการจัดส่งล่าสุด</h2></div>
+            <div class="card-header"><h2>ประวัติการจัดส่ง</h2></div>
             <div class="card-body">
+                <div class="history-filter-bar">
+                    <div class="form-group"><label>วันที่จัดส่ง (จาก):</label><input type="text" id="shipHistFrom" onchange="loadShipmentHistory()"></div>
+                    <div class="form-group"><label>ถึง:</label><input type="text" id="shipHistTo" onchange="loadShipmentHistory()"></div>
+                    <div class="form-group" style="flex:1; min-width:160px;"><label>เลขที่ใบเบิกอ้างอิง:</label><input type="text" id="shipHistReqNo" placeholder="ค้นหาเลขที่ใบเบิก..." oninput="debouncedLoadShipmentHistory()"></div>
+                    <button type="button" class="btn-outline btn-sm" onclick="resetShipmentHistoryFilter()">ล้างตัวกรอง</button>
+                </div>
+                <p class="text-faint" style="font-size:12.5px; margin-bottom:10px;">คลิกเลขที่จัดส่งเพื่อดูรายการยาที่จัดส่งในใบนั้น</p>
                 <div class="table-scroll">
                     <table class="data-table">
-                        <thead><tr><th>เลขที่จัดส่ง</th><th>วันที่</th><th>อ้างอิงใบเบิก</th><th>รายการที่จัดส่ง</th><th>ผู้จัดส่ง</th><th>หมายเหตุ</th></tr></thead>
+                        <thead><tr><th>เลขที่จัดส่ง</th><th>วันที่</th><th>ผู้จัดส่ง</th><th>อ้างอิงใบเบิก</th><th>จำนวนรายการ</th></tr></thead>
                         <tbody id="shipmentHistoryBody"></tbody>
                     </table>
                 </div>

@@ -16,6 +16,28 @@ function handleError(res, err, fallbackMsg) {
     res.status(err.status || 500).json({ error: err.message || fallbackMsg });
 }
 
+// ตรวจสอบพารามิเตอร์ช่วงวันที่ (from/to) ก่อนนำไป query เสมอ — ใช้ร่วมกันทุก endpoint ที่รับ from/to
+// (/requisitions, /receipts, /movements) กันทั้งรูปแบบวันที่ผิด (ไม่ใช่ YYYY-MM-DD) และช่วงกลับด้าน (จาก > ถึง)
+// โยน error status 400 พร้อมข้อความภาษาไทยที่ชัดเจน ให้ handleError ส่งกลับเป็น JSON error ตามปกติ
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function validateDateRangeQuery(from, to) {
+    if (from && !ISO_DATE_RE.test(from)) {
+        const err = new Error(`รูปแบบวันที่ "จาก" ไม่ถูกต้อง (ต้องเป็น YYYY-MM-DD): ${from}`);
+        err.status = 400;
+        throw err;
+    }
+    if (to && !ISO_DATE_RE.test(to)) {
+        const err = new Error(`รูปแบบวันที่ "ถึง" ไม่ถูกต้อง (ต้องเป็น YYYY-MM-DD): ${to}`);
+        err.status = 400;
+        throw err;
+    }
+    if (from && to && from > to) {
+        const err = new Error('ช่วงวันที่ไม่ถูกต้อง: วันที่ "จาก" ต้องไม่เกินวันที่ "ถึง"');
+        err.status = 400;
+        throw err;
+    }
+}
+
 // ---------- ล้างข้อมูลทดสอบ (เฉพาะช่วงทดสอบระบบ — ต้องมีรหัสผ่านแยกต่างหากจาก login ปกติ) ----------
 
 router.post('/admin/clear-test-data', async (req, res) => {
@@ -90,8 +112,11 @@ router.post('/requisitions', async (req, res) => {
 });
 
 router.get('/requisitions', async (req, res) => {
-    try { res.json(await stock.listRequisitions({ status: req.query.status })); }
-    catch (err) { handleError(res, err, 'ดึงรายการใบเบิกไม่สำเร็จ'); }
+    try {
+        const { status, from, to, reqNo } = req.query;
+        validateDateRangeQuery(from, to);
+        res.json(await stock.listRequisitions({ status, from, to, reqNo }));
+    } catch (err) { handleError(res, err, 'ดึงรายการใบเบิกไม่สำเร็จ'); }
 });
 
 router.get('/requisitions/:id', async (req, res) => {
@@ -121,8 +146,11 @@ router.post('/receipts', async (req, res) => {
 });
 
 router.get('/receipts', async (req, res) => {
-    try { res.json(await stock.listReceipts()); }
-    catch (err) { handleError(res, err, 'ดึงรายการรับเข้าคลังไม่สำเร็จ'); }
+    try {
+        const { from, to, reqNo } = req.query;
+        validateDateRangeQuery(from, to);
+        res.json(await stock.listReceipts({ from, to, reqNo }));
+    } catch (err) { handleError(res, err, 'ดึงรายการรับเข้าคลังไม่สำเร็จ'); }
 });
 
 router.get('/receipts/:id', async (req, res) => {
@@ -164,6 +192,7 @@ router.post('/adjustments', async (req, res) => {
 router.get('/movements', async (req, res) => {
     try {
         const { from, to, drugCode, movementType, limit } = req.query;
+        validateDateRangeQuery(from, to);
         res.json(await stock.listMovements({ from, to, drugCode, movementType, limit }));
     } catch (err) { handleError(res, err, 'ดึงประวัติความเคลื่อนไหวไม่สำเร็จ'); }
 });

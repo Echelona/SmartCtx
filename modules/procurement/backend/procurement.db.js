@@ -90,11 +90,21 @@ async function createShipment({ reqId, shipmentDate, note, items, shippedBy }) {
     });
 }
 
-async function listShipments() {
-    const shipments = await dbAll(`SELECT * FROM shipments ORDER BY id DESC`);
+// รองรับกรองตามช่วงวันที่จัดส่ง (from/to, inclusive) และค้นหาเลขที่ใบเบิกอ้างอิงแบบ partial match (reqNo)
+// LEFT JOIN requisitions แทนการ dbGet เลขที่ใบเบิกแยกทีละแถวแบบเดิม เพื่อกรอง/แสดง req_no ในคำสั่งเดียวกัน
+async function listShipments({ from, to, reqNo } = {}) {
+    let sql = `SELECT sh.*, req.req_no AS req_no
+               FROM shipments sh
+               LEFT JOIN requisitions req ON req.id = sh.requisition_id
+               WHERE 1=1`;
+    const params = [];
+    if (from) { sql += ` AND sh.shipment_date >= ?`; params.push(from); }
+    if (to) { sql += ` AND sh.shipment_date <= ?`; params.push(to); }
+    if (reqNo) { sql += ` AND req.req_no LIKE ?`; params.push(`%${reqNo}%`); }
+    sql += ` ORDER BY sh.id DESC`;
+    const shipments = await dbAll(sql, params);
     const out = [];
     for (const s of shipments) {
-        const requisition = await dbGet(`SELECT req_no FROM requisitions WHERE id = ?`, [s.requisition_id]);
         const shipmentItems = await dbAll(
             `SELECT si.qty_shipped AS qty_shipped, ri.drug_name AS drug_name, ri.strength AS strength, ri.unit AS unit
              FROM shipment_items si
@@ -102,7 +112,7 @@ async function listShipments() {
              WHERE si.shipment_id = ?`,
             [s.id]
         );
-        out.push({ ...s, req_no: requisition?.req_no || '-', items: shipmentItems });
+        out.push({ ...s, req_no: s.req_no || '-', items: shipmentItems });
     }
     return out;
 }

@@ -285,11 +285,17 @@ function computeShipStatus(items) {
     return 'partially_shipped';
 }
 
-async function listRequisitions({ status } = {}) {
-    const rows = await dbAll(
-        status ? `SELECT * FROM requisitions WHERE status = ? ORDER BY id DESC` : `SELECT * FROM requisitions ORDER BY id DESC`,
-        status ? [status] : []
-    );
+// รองรับกรองตามช่วงวันที่เบิก (from/to, inclusive) และค้นหาเลขที่ใบเบิกแบบ partial match (reqNo)
+// นอกเหนือจากสถานะเดิม (status) — ใช้กับทั้งตาราง "รายการใบเบิกทั้งหมด" และหน้าประวัติต่างๆ
+async function listRequisitions({ status, from, to, reqNo } = {}) {
+    let sql = `SELECT * FROM requisitions WHERE 1=1`;
+    const params = [];
+    if (status) { sql += ` AND status = ?`; params.push(status); }
+    if (from) { sql += ` AND req_date >= ?`; params.push(from); }
+    if (to) { sql += ` AND req_date <= ?`; params.push(to); }
+    if (reqNo) { sql += ` AND req_no LIKE ?`; params.push(`%${reqNo}%`); }
+    sql += ` ORDER BY id DESC`;
+    const rows = await dbAll(sql, params);
     const out = [];
     for (const r of rows) {
         const items = await dbAll(`SELECT * FROM requisition_items WHERE requisition_id = ?`, [r.id]);
@@ -424,8 +430,20 @@ async function createReceipt({ receiptDate, reqId, receivedBy, note, items }) {
     });
 }
 
-async function listReceipts() {
-    const rows = await dbAll(`SELECT * FROM receipts ORDER BY id DESC`);
+// รองรับกรองตามช่วงวันที่รับเข้า (from/to, inclusive) และค้นหาเลขที่ใบเบิกที่อ้างอิง (reqNo, partial match)
+// reqNo ไม่ได้เก็บอยู่ในตาราง receipts ตรงๆ (มีแค่ requisition_id) จึง LEFT JOIN requisitions มาด้วยเสมอ
+// เพื่อทั้งกรองและแสดงเลขที่ใบเบิกอ้างอิงในผลลัพธ์ (source_req_no) — LEFT JOIN เพราะรับเข้าบางรายการไม่ได้อ้างอิงใบเบิก (reqId เป็น null ได้)
+async function listReceipts({ from, to, reqNo } = {}) {
+    let sql = `SELECT rc.*, req.req_no AS source_req_no
+               FROM receipts rc
+               LEFT JOIN requisitions req ON req.id = rc.requisition_id
+               WHERE 1=1`;
+    const params = [];
+    if (from) { sql += ` AND rc.receipt_date >= ?`; params.push(from); }
+    if (to) { sql += ` AND rc.receipt_date <= ?`; params.push(to); }
+    if (reqNo) { sql += ` AND req.req_no LIKE ?`; params.push(`%${reqNo}%`); }
+    sql += ` ORDER BY rc.id DESC`;
+    const rows = await dbAll(sql, params);
     const out = [];
     for (const r of rows) {
         const items = await dbAll(`SELECT * FROM receipt_items WHERE receipt_id = ?`, [r.id]);

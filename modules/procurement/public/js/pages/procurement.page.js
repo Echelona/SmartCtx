@@ -25,6 +25,21 @@ function formatNumber(n) {
 }
 function todayIso() { return new Date().toISOString().slice(0, 10); }
 
+// ตรวจสอบช่วงวันที่ (from/to) ก่อนยิง query ทุกครั้ง — เดียวกับ validateDateRangeInputs ใน stock.page.js (1.2)
+// คืนค่าข้อความ error ถ้าช่วงกลับด้าน (จาก > ถึง) แล้วเน้นกรอบสีแดงให้ผู้ใช้เห็นทันที มิเช่นนั้นคืน null และล้างสถานะ error
+function validateDateRangeInputs(fromEl, toEl) {
+    fromEl.classList.remove('input-error');
+    toEl.classList.remove('input-error');
+    const from = getDateValue(fromEl);
+    const to = getDateValue(toEl);
+    if (from && to && from > to) {
+        fromEl.classList.add('input-error');
+        toEl.classList.add('input-error');
+        return 'ช่วงวันที่ไม่ถูกต้อง: วันที่ "จาก" ต้องไม่เกินวันที่ "ถึง"';
+    }
+    return null;
+}
+
 async function apiGet(url) {
     const res = await fetch(API_BASE + url);
     const data = await res.json().catch(() => ({}));
@@ -232,21 +247,81 @@ async function submitShipment(reqId, idx) {
 }
 
 // ===================== ประวัติการจัดส่ง =====================
+let shipmentHistoryCache = [];
+let openShipHistIdx = null;
+
+function shipmentHistoryQuery() {
+    const from = getDateValue(document.getElementById('shipHistFrom'));
+    const to = getDateValue(document.getElementById('shipHistTo'));
+    const reqNo = document.getElementById('shipHistReqNo').value.trim();
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    if (reqNo) params.set('reqNo', reqNo);
+    const qs = params.toString();
+    return qs ? `?${qs}` : '';
+}
+
 async function loadShipmentHistory() {
+    const rangeError = validateDateRangeInputs(document.getElementById('shipHistFrom'), document.getElementById('shipHistTo'));
+    if (rangeError) {
+        showToast(rangeError, 'error');
+        document.getElementById('shipmentHistoryBody').innerHTML = `<tr><td colspan="5" class="table-empty text-danger">${escapeHtml(rangeError)}</td></tr>`;
+        return;
+    }
     try {
-        const rows = await apiGet('/shipments');
+        const rows = await apiGet(`/shipments${shipmentHistoryQuery()}`);
+        shipmentHistoryCache = rows;
+        openShipHistIdx = null;
         const tbody = document.getElementById('shipmentHistoryBody');
-        if (!rows.length) { tbody.innerHTML = `<tr><td colspan="6" class="table-empty">ยังไม่มีประวัติการจัดส่ง</td></tr>`; return; }
-        tbody.innerHTML = rows.map(s => `
+        if (!rows.length) { tbody.innerHTML = `<tr><td colspan="5" class="table-empty">ไม่พบประวัติการจัดส่งตามเงื่อนไขที่ค้นหา</td></tr>`; return; }
+        tbody.innerHTML = rows.map((s, idx) => `
             <tr>
-                <td><strong>${escapeHtml(s.shipment_no)}</strong></td>
+                <td><a class="expand-toggle" onclick="toggleShipmentHistoryDetail(${idx})"><strong>${escapeHtml(s.shipment_no)}</strong></a></td>
                 <td>${escapeHtml(formatDateDisplay(s.shipment_date))}</td>
-                <td>${escapeHtml(s.req_no)}</td>
-                <td>${s.items.map(it => `${escapeHtml(it.drug_name)} (${formatNumber(it.qty_shipped)} ${escapeHtml(it.unit || '')})`).join(', ')}</td>
                 <td>${escapeHtml(s.shipped_by || '-')}</td>
-                <td>${escapeHtml(s.note || '-')}</td>
-            </tr>`).join('');
+                <td>${escapeHtml(s.req_no)}</td>
+                <td>${formatNumber(s.items.length)}</td>
+            </tr>
+            <tr class="expand-row" id="shipHistDetail-${idx}" style="display:none;"><td colspan="5"></td></tr>`).join('');
     } catch (err) { showToast(err.message, 'error'); }
+}
+let debouncedLoadShipmentHistoryTimer = null;
+function debouncedLoadShipmentHistory() {
+    clearTimeout(debouncedLoadShipmentHistoryTimer);
+    debouncedLoadShipmentHistoryTimer = setTimeout(loadShipmentHistory, 350);
+}
+function resetShipmentHistoryFilter() {
+    setDateValue(document.getElementById('shipHistFrom'), todayIso());
+    setDateValue(document.getElementById('shipHistTo'), todayIso());
+    document.getElementById('shipHistReqNo').value = '';
+    loadShipmentHistory();
+}
+
+// ขยายแถวดูรายการยาที่จัดส่งในใบนั้น (ยา / จำนวนที่จัดส่ง / หน่วย) — ข้อมูล items มากับ /shipments อยู่แล้ว
+// จึงใช้ shipmentHistoryCache ที่โหลดไว้แสดงได้ทันที ไม่ต้องยิง API เพิ่ม (ต่างจาก toggleReceiptHistoryDetail ฝั่งคลังที่ต้องเรียก /receipts/:id)
+function toggleShipmentHistoryDetail(idx) {
+    const row = document.getElementById(`shipHistDetail-${idx}`);
+    if (!row) return;
+    if (openShipHistIdx === idx) { row.style.display = 'none'; openShipHistIdx = null; return; }
+    document.querySelectorAll('#shipmentHistoryBody .expand-row').forEach(r => r.style.display = 'none');
+    openShipHistIdx = idx;
+
+    const s = shipmentHistoryCache[idx];
+    if (!s) return;
+    if (!s.items.length) {
+        row.querySelector('td').innerHTML = `<div class="expand-content text-faint">ไม่มีรายการยาในใบจัดส่งนี้</div>`;
+        row.style.display = 'table-row';
+        return;
+    }
+    const itemChips = s.items.map(it => `
+        <span class="ship-history-item-chip">${escapeHtml(it.drug_name)}${it.strength ? ' (' + escapeHtml(it.strength) + ')' : ''} — ${formatNumber(it.qty_shipped)} ${escapeHtml(it.unit || '')}</span>`).join('');
+    row.querySelector('td').innerHTML = `
+        <div class="expand-content">
+            ${s.note ? `<p class="text-faint" style="margin-bottom:8px;">หมายเหตุ: ${escapeHtml(s.note)}</p>` : ''}
+            <div class="ship-history-items-row">${itemChips}</div>
+        </div>`;
+    row.style.display = 'table-row';
 }
 
 // ===================== ใบสั่งซื้อ (ดู/พิมพ์ PDF) =====================
@@ -285,6 +360,11 @@ document.addEventListener('DOMContentLoaded', () => {
     initTabs();
     loadUserChip();
     loadRequisitionList();
+
+    // ตัวกรองประวัติการจัดส่ง — ค่าเริ่มต้นเป็นวันปัจจุบันทั้งสองช่อง (ผู้ใช้ปรับช่วงวันที่เองได้ภายหลัง)
+    // อยู่ในแท็บที่ไม่ได้ active ตอนโหลดหน้า แต่ initThaiDatePicker ทำงานได้แม้ element ถูกซ่อนด้วย CSS
+    initThaiDatePicker(document.getElementById('shipHistFrom')); setDateValue(document.getElementById('shipHistFrom'), todayIso());
+    initThaiDatePicker(document.getElementById('shipHistTo')); setDateValue(document.getElementById('shipHistTo'), todayIso());
 
     // เหตุการณ์เรียลไทม์: ฝั่งคลังเคมีบำบัดสร้างใบเบิกใหม่ หรือรับเข้าคลัง (อาจกระทบสถานะที่แสดง) — รีเฟรชทันที
     // ข้ามการรีเฟรชถ้ามีแถวเปิดค้างอยู่ (กำลังกรอกฟอร์มจัดส่ง) กันข้อมูลที่พิมพ์ค้างหาย
