@@ -5,6 +5,7 @@
 
 const { dbRun, dbGet, dbAll, withTransaction, nextDocNumber } = require('../../_shared/backend/warehouseSchema.db');
 const eventBus = require('../../_shared/backend/eventBus.util');
+const { runGuardedUpdate } = require('../../_shared/backend/concurrency.util');
 
 function todayIso() {
     return new Date().toISOString().slice(0, 10);
@@ -72,13 +73,22 @@ async function createShipment({ reqId, shipmentDate, note, items, shippedBy }) {
                 throw err;
             }
             const qty = Number(it.qty);
-            const remaining = reqItem.qty_requested - reqItem.qty_shipped;
-            if (qty <= 0 || qty > remaining + 1e-9) {
-                const err = new Error(`จำนวนที่จัดส่งของ ${reqItem.drug_name} เกินยอดคงเหลือที่เบิก (เหลือ ${remaining})`);
+            if (qty <= 0) {
+                const err = new Error(`จำนวนที่จัดส่งของ ${reqItem.drug_name} ต้องมากกว่า 0`);
                 err.status = 400;
                 throw err;
             }
-            await dbRun(`UPDATE requisition_items SET qty_shipped = qty_shipped + ? WHERE id = ?`, [qty, reqItem.id]);
+            // เช็คยอดคงเหลือที่เบิกได้จริงใน WHERE เดียวกับ UPDATE (pattern กลาง — ดู concurrency.util.js)
+            // แทนการเช็ค `remaining` ที่คำนวณจาก reqItem ที่อ่านไว้ก่อนหน้า (อาจเก่าไปแล้วถ้ามีการจัดส่งรายการ
+            // เดียวกันนี้พร้อมกันจากอีก session) — เผื่อรวมเช็คด้วยว่าใบเบิกยังไม่ถูกยกเลิกไปพร้อมๆ กัน (ปกติ
+            // เช็คไปแล้วข้างบน แต่ระหว่างนั้นถึงตอนนี้อาจมีคนกดยกเลิกพอดี จึงเช็คซ้ำแบบ atomic ในนี้ด้วย)
+            await runGuardedUpdate(dbRun,
+                `UPDATE requisition_items SET qty_shipped = qty_shipped + ?
+                 WHERE id = ? AND requisition_id = ? AND (qty_requested - qty_shipped) >= ?
+                   AND requisition_id NOT IN (SELECT id FROM requisitions WHERE status = 'cancelled')`,
+                [qty, reqItem.id, reqId, qty],
+                `จำนวนที่จัดส่งของ ${reqItem.drug_name} เกินยอดคงเหลือที่เบิก หรือใบเบิกถูกยกเลิกไปแล้ว — อาจมีการจัดส่ง/ยกเลิกจากผู้ใช้อื่นพร้อมกัน กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง`
+            );
             await dbRun(`INSERT INTO shipment_items (shipment_id, requisition_item_id, qty_shipped) VALUES (?, ?, ?)`,
                 [shipmentId, reqItem.id, qty]);
         }

@@ -9,7 +9,7 @@
 <body>
 <header class="app-header">
     <div class="header-top-row">
-        <div><h1>🩺 Pharm Care Unit <span class="app-version">SmartCtx V.1.0.0</span></h1></div>
+        <div><h1>🩺 Pharm Care Unit <span data-app-version></span></h1></div>
         <div><span class="user-chip" id="userChip">👤 —</span><button class="logout-btn" onclick="logout()">🚪 ออกจากระบบ</button></div>
     </div>
 </header>
@@ -30,5 +30,6 @@ fetch('/modules/pharm-care-unit/api/auth/status').then(r => r.json()).then(d => 
     if (d.authenticated) document.getElementById('userChip').textContent = '👤 ' + d.username;
 });
 </script>
+<script src="/core/js/shared/appVersion.shared.js"></script>
 </body>
 </html>

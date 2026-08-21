@@ -1,9 +1,16 @@
+<!--
+  TEMPLATE สำหรับสร้างหน้า login.html ของโมดูลใหม่ในอนาคต
+  วิธีใช้: copy ไฟล์นี้ไปตั้งชื่อใหม่ แล้วแก้แค่ 4 จุดที่มีคอมเมนต์ "แก้ตรงนี้" — ที่เหลือ (CSS, layout,
+  error handling, และเลข version) เหมือนกันทุกโมดูลอยู่แล้วโดยไม่ต้องแตะ
+  ไม่ต้องใส่เลข version เอง — <span data-app-version></span> + script ท้ายไฟล์จะดึงจาก
+  core/public/js/shared/appVersion.shared.js ให้อัตโนมัติ (แก้เลข version ที่ไฟล์นั้นไฟล์เดียว มีผลทุกโมดูล)
+-->
 <!DOCTYPE html>
 <html lang="th">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>เข้าสู่ระบบ — งานผสมเคมีบำบัดเฉพาะราย | SmartCtx</title>
+<title>เข้าสู่ระบบ — [ชื่อโมดูล] | SmartCtx</title> <!-- แก้ตรงนี้ (1): ชื่อโมดูล -->
 <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -43,7 +50,7 @@
 <body>
 <div class="login-card">
     <img src="/core/img/logo.png" alt="CatCode Studio" class="login-logo">
-    <div class="brand">🧪 งานผสมเคมีบำบัดเฉพาะราย</div>
+    <div class="brand">🆕 [ไอคอน + ชื่อโมดูล]</div> <!-- แก้ตรงนี้ (2): ไอคอน emoji + ชื่อโมดูลที่แสดงในการ์ด -->
     <div class="subbrand">SmartCtx — Smart Cytotoxic Admixture Service <span data-app-version></span></div>
 
     <div id="error-box" class="error-msg"></div>
@@ -71,14 +78,14 @@
         const errorBox = document.getElementById('error-box');
         errorBox.style.display = 'none';
         try {
-            const res = await fetch('/modules/chemo-prep/api/auth/login', {
+            const res = await fetch('/modules/[module-key]/api/auth/login', { // แก้ตรงนี้ (3): module-key ให้ตรงกับที่ตั้งใน server.js
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password })
             });
             const data = await res.json();
             if (data.success) {
-                window.location.href = '/modules/chemo-prep/chemoprep.html';
+                window.location.href = '/modules/[module-key]/[หน้าแรกหลัง-login].html'; // แก้ตรงนี้ (4): path หน้าแรกของโมดูล
             } else {
                 errorBox.textContent = '❌ ' + (data.message || 'เข้าสู่ระบบไม่สำเร็จ');
                 errorBox.style.display = 'block';

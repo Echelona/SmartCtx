@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const { dbRun, dbGet, dbAll, withTransaction, nextDocNumber, ready } = require('../../_shared/backend/warehouseSchema.db');
 const { CHEMO_DRUG_REFERENCE, LOOKUP_SEED_DATA } = require('../../../shared-data/chemoDrugs.data');
 const eventBus = require('../../_shared/backend/eventBus.util');
+const { runGuardedUpdate } = require('../../_shared/backend/concurrency.util');
 
 function todayIso() {
     return new Date().toISOString().slice(0, 10);
@@ -93,12 +94,27 @@ async function ensureCancelAuditColumns() {
     if (!names.includes('cancelled_at')) await dbRun(`ALTER TABLE requisitions ADD COLUMN cancelled_at TEXT`);
 }
 
+// ---------- Migration: เพิ่มคอลัมน์ version สำหรับกันผู้ใช้หลายคนแก้ข้อมูลเดียวกันพร้อมกัน (optimistic
+// concurrency control — ดู concurrency.util.js) เฉพาะตารางที่เป็น "ข้อมูลตั้งค่า" ที่แก้ไขทั้งแถวได้อิสระ
+// (drug_master, lookup_options) — ส่วนตารางที่เป็นยอด/จำนวน (stock_lots, requisition_items) ใช้ยอด
+// คงเหลือจริงเป็นเงื่อนไขกันชนแทน ไม่ต้องมีคอลัมน์ version แยก (ดู adjustLot / createShipment / createReceipt)
+async function ensureConcurrencyVersionColumns() {
+    await ready;
+    for (const table of ['drug_master', 'lookup_options']) {
+        const cols = await dbAll(`PRAGMA table_info(${table})`);
+        if (!cols.map(c => c.name).includes('version')) {
+            await dbRun(`ALTER TABLE ${table} ADD COLUMN version INTEGER NOT NULL DEFAULT 1`);
+        }
+    }
+}
+
 // รัน seed/migration ทั้งหมดตามลำดับเสมอ (ห้ามยิงพร้อมกัน) — sqlite connection เดียวรองรับ transaction ซ้อนกันไม่ได้
 // (เจอบั๊กจริง: "cannot start a transaction within a transaction" ตอนสอง seed function เริ่มพร้อมกันแบบไม่ chain)
 (async () => {
     try { await seedDrugMasterIfEmpty(); } catch (err) { console.error('seed drug_master ไม่สำเร็จ:', err); }
     try { await seedLookupOptionsIfEmpty(); } catch (err) { console.error('seed lookup_options ไม่สำเร็จ:', err); }
     try { await ensureCancelAuditColumns(); } catch (err) { console.error('migrate cancel-audit columns ไม่สำเร็จ:', err); }
+    try { await ensureConcurrencyVersionColumns(); } catch (err) { console.error('migrate concurrency version columns ไม่สำเร็จ:', err); }
 })();
 
 async function listLookupOptions(listType, { activeOnly } = {}) {
@@ -133,17 +149,25 @@ async function createLookupOption(listType, value) {
     }
 }
 
-async function updateLookupOption(id, { value, active }) {
+async function updateLookupOption(id, { value, active, version }) {
     const existing = await dbGet(`SELECT * FROM lookup_options WHERE id = ?`, [id]);
     if (!existing) {
         const err = new Error('ไม่พบตัวเลือกที่ระบุ');
         err.status = 404;
         throw err;
     }
+    if (version === undefined || version === null) {
+        const err = new Error('ข้อมูลเวอร์ชันไม่ครบ — กรุณาโหลดหน้าใหม่แล้วลองอีกครั้ง');
+        err.status = 400;
+        throw err;
+    }
     try {
-        await dbRun(
-            `UPDATE lookup_options SET value = ?, active = ? WHERE id = ?`,
-            [(value ?? existing.value).trim(), active === undefined ? existing.active : (active ? 1 : 0), id]
+        // เช็ค version ใน WHERE เดียวกับ UPDATE (pattern กลาง — ดู concurrency.util.js): ถ้าตอนนี้ version
+        // ในฐานข้อมูลไม่ตรงกับที่ผู้ใช้โหลดไปตอนแรก แปลว่ามีคนอื่นแก้ตัวเลือกนี้ไปแล้วระหว่างที่ผู้ใช้กำลังแก้อยู่
+        await runGuardedUpdate(dbRun,
+            `UPDATE lookup_options SET value = ?, active = ?, version = version + 1 WHERE id = ? AND version = ?`,
+            [(value ?? existing.value).trim(), active === undefined ? existing.active : (active ? 1 : 0), id, version],
+            'ตัวเลือกนี้ถูกแก้ไขโดยผู้ใช้อื่นไปแล้วระหว่างที่คุณกำลังแก้ไข กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง'
         );
         const row = await dbGet(`SELECT * FROM lookup_options WHERE id = ?`, [id]);
         eventBus.emit('lookup:changed', { listType: row.list_type, action: 'updated' });
@@ -196,11 +220,16 @@ async function createDrug({ drugCode, name, strength, strengthValue, strengthUni
     }
 }
 
-async function updateDrug(id, { name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost, active }) {
+async function updateDrug(id, { name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost, active, version }) {
     const existing = await dbGet(`SELECT * FROM drug_master WHERE id = ?`, [id]);
     if (!existing) {
         const err = new Error('ไม่พบรายการยาที่ระบุ');
         err.status = 404;
+        throw err;
+    }
+    if (version === undefined || version === null) {
+        const err = new Error('ข้อมูลเวอร์ชันไม่ครบ — กรุณาโหลดหน้าใหม่แล้วลองอีกครั้ง');
+        err.status = 400;
         throw err;
     }
     const newStrengthValue = strengthValue !== undefined ? strengthValue : existing.strength_value;
@@ -213,8 +242,10 @@ async function updateDrug(id, { name, strength, strengthValue, strengthUnit, pac
     const newDisplayPackSize = (packSizeValue !== undefined || packSizeUnit !== undefined)
         ? deriveStrengthDisplay(newPackSizeValue, newPackSizeUnit)
         : (packSize ?? existing.pack_size);
-    await dbRun(
-        `UPDATE drug_master SET name = ?, strength = ?, strength_value = ?, strength_unit = ?, pack_size = ?, pack_size_value = ?, pack_size_unit = ?, category = ?, unit = ?, default_cost = ?, active = ? WHERE id = ?`,
+    // เช็ค version ใน WHERE เดียวกับ UPDATE (pattern กลาง — ดู concurrency.util.js): กันสองคนแก้ยาตัวเดียวกัน
+    // พร้อมกันแล้วคนหลังเขียนทับการแก้ไขของคนแรกไปเงียบๆ โดยไม่รู้ตัว
+    await runGuardedUpdate(dbRun,
+        `UPDATE drug_master SET name = ?, strength = ?, strength_value = ?, strength_unit = ?, pack_size = ?, pack_size_value = ?, pack_size_unit = ?, category = ?, unit = ?, default_cost = ?, active = ?, version = version + 1 WHERE id = ? AND version = ?`,
         [
             name ?? existing.name,
             newDisplayStrength,
@@ -227,8 +258,10 @@ async function updateDrug(id, { name, strength, strengthValue, strengthUnit, pac
             unit ?? existing.unit,
             defaultCost ?? existing.default_cost,
             active === undefined ? existing.active : (active ? 1 : 0),
-            id
-        ]
+            id,
+            version
+        ],
+        'ข้อมูลยารายการนี้ถูกแก้ไขโดยผู้ใช้อื่นไปแล้วระหว่างที่คุณกำลังแก้ไข กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง'
     );
     const row = await dbGet(`SELECT * FROM drug_master WHERE id = ?`, [id]);
     eventBus.emit('drug:changed', { id: row.id, action: 'updated' });
@@ -353,9 +386,12 @@ async function cancelRequisition(id, password, cancelledBy) {
         throw err;
     }
     const now = new Date().toISOString();
-    await dbRun(
-        `UPDATE requisitions SET status = 'cancelled', cancelled_by = ?, cancelled_at = ? WHERE id = ?`,
-        [cancelledBy || null, now, id]
+    // เช็ค status='pending' ใน WHERE เดียวกับ UPDATE (pattern กลาง — ดู concurrency.util.js): เผื่อระหว่าง
+    // ที่อ่าน r.status ข้างบนกับตอนนี้ มีคนอื่นเริ่มจัดส่ง/รับเข้าไปแล้ว (เปลี่ยนสถานะไปจาก pending) พอดี
+    await runGuardedUpdate(dbRun,
+        `UPDATE requisitions SET status = 'cancelled', cancelled_by = ?, cancelled_at = ? WHERE id = ? AND status = 'pending'`,
+        [cancelledBy || null, now, id],
+        'ใบเบิกนี้ถูกเปลี่ยนสถานะไปแล้ว (เช่น เริ่มมีการจัดส่ง/รับเข้า) ก่อนที่คำสั่งยกเลิกจะสำเร็จ กรุณาโหลดข้อมูลใหม่'
     );
     // แจ้งฝั่งงานจัดซื้อ (procurement) แบบ realtime ว่าใบเบิกนี้ถูกยกเลิกแล้ว
     // — ไม่งั้นสถานะที่ DB เปลี่ยนถูกต้อง แต่ UI ฝั่งจัดซื้อจะไม่รีเฟรชจนกว่าจะโหลดข้อมูลใหม่เอง
@@ -426,30 +462,47 @@ async function createReceipt({ receiptDate, reqId, receivedBy, note, items }) {
             // ทบยอดรับเข้าใน requisition_items ที่ตรงชนิดยา — ผูกกับ "จำนวนที่จัดส่งมาแล้วจริง" (qty_shipped)
             // ไม่ใช่จำนวนที่เบิกไปทั้งหมด (qty_requested) เพราะถ้าอิงยอดเบิก จะลงรับของที่งานจัดซื้อยังไม่ได้ส่งมาได้จริงๆ
             // (บั๊กเดิม: รายการที่ยังค้างส่งอยู่ที่งานจัดซื้อ แต่ระบบยอมให้ฝั่งคลังลงรับได้เหมือนของมาถึงแล้ว)
+            //
+            // กฎ: บันทึกรับเข้าคลังอ้างอิงใบเบิกได้ครั้งละใบเท่านั้น และห้ามแก้ไขจำนวนรับเมื่ออ้างอิงใบเบิก —
+            // จึงบังคับ 2 ชั้นที่นี่ (เป็นชั้นตัดสินจริง กัน bypass ผ่านการยิง API ตรงๆ ข้ามหน้าเว็บ):
+            //   1) ทุกรายการยาที่ส่งมาต้องอยู่ในใบเบิกที่อ้างอิง (reqId) เท่านั้น ห้ามมีรายการนอกใบเบิกปนมา
+            //   2) จำนวนที่ส่งมาต้องเท่ากับยอดที่จัดส่งแล้วแต่ยังไม่ได้ลงรับ (qty_shipped - qty_received) พอดีเป๊ะ
+            //      ไม่ใช่แค่ไม่เกิน — ป้องกันการพิมพ์จำนวนเองผิดจากยอดที่ระบบคำนวณให้อัตโนมัติ
             if (reqId) {
                 const matchingItems = await dbAll(
                     `SELECT * FROM requisition_items WHERE requisition_id = ? AND drug_code = ? ORDER BY id ASC`,
                     [reqId, it.drugCode]
                 );
-                if (matchingItems.length > 0) {
-                    const availableToReceive = matchingItems.reduce((s, ri) => s + Math.max(0, ri.qty_shipped - ri.qty_received), 0);
-                    if (qty > availableToReceive + 1e-9) {
-                        const err = new Error(
-                            `รับเข้า ${it.drugName} (${qty}) เกินจำนวนที่จัดส่งมาจริง — จัดส่งแล้วแต่ยังไม่ได้ลงรับเพียง ${availableToReceive} ${it.unit || ''} เท่านั้น (ส่วนที่เหลือยังค้างส่งอยู่ที่งานจัดซื้อ)`
-                        );
-                        err.status = 400;
-                        throw err;
-                    }
-                    let remaining = qty;
-                    for (const ri of matchingItems) {
-                        if (remaining <= 0) break;
-                        const canApply = Math.min(remaining, Math.max(0, ri.qty_shipped - ri.qty_received));
-                        if (canApply <= 0) continue;
-                        await dbRun(`UPDATE requisition_items SET qty_received = qty_received + ? WHERE id = ?`, [canApply, ri.id]);
-                        remaining -= canApply;
-                    }
+                if (matchingItems.length === 0) {
+                    const err = new Error(
+                        `${it.drugName} ไม่ได้อยู่ในใบเบิกที่อ้างอิง — บันทึกรับเข้าที่อ้างอิงใบเบิกได้เฉพาะรายการยาที่อยู่ในใบเบิกนั้นเท่านั้น (อ้างอิงใบเบิกได้ครั้งละ 1 ใบ)`
+                    );
+                    err.status = 400;
+                    throw err;
                 }
-                // matchingItems.length === 0 → ยานี้ไม่ได้อยู่ในใบเบิกที่อ้างอิงเลย ถือเป็นรายการเพิ่มเติมนอกใบเบิก ปล่อยผ่านตามเดิม
+                const availableToReceive = matchingItems.reduce((s, ri) => s + Math.max(0, ri.qty_shipped - ri.qty_received), 0);
+                if (Math.abs(qty - availableToReceive) > 1e-9) {
+                    const err = new Error(
+                        `จำนวนรับเข้าของ ${it.drugName} ต้องเท่ากับจำนวนที่จัดส่งมาแล้วแต่ยังไม่ได้ลงรับพอดี (${availableToReceive} ${it.unit || ''}) — ระบบล็อกจำนวนนี้ให้อัตโนมัติ แก้ไขเองไม่ได้เมื่ออ้างอิงใบเบิก`
+                    );
+                    err.status = 400;
+                    throw err;
+                }
+                let remaining = qty;
+                for (const ri of matchingItems) {
+                    if (remaining <= 0) break;
+                    const canApply = Math.min(remaining, Math.max(0, ri.qty_shipped - ri.qty_received));
+                    if (canApply <= 0) continue;
+                    // เช็คยอดคงเหลือจริงใน WHERE เดียวกับ UPDATE (pattern กลาง — ดู concurrency.util.js):
+                    // กันกรณีมีคนอื่นลงรับรายการเดียวกันนี้พร้อมกันระหว่าง availableToReceive ที่คำนวณไว้
+                    // ข้างบนกับตอนที่ UPDATE จริง — ถ้ายอดไม่พอแล้ว ปฏิเสธทั้งใบทันที (ไม่ apply บางส่วนค้างไว้)
+                    await runGuardedUpdate(dbRun,
+                        `UPDATE requisition_items SET qty_received = qty_received + ? WHERE id = ? AND (qty_shipped - qty_received) >= ?`,
+                        [canApply, ri.id, canApply],
+                        `จำนวนที่จัดส่งของ ${it.drugName} มีการเปลี่ยนแปลงโดยผู้ใช้อื่นระหว่างนี้ (อาจมีการลงรับซ้อนกัน) กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง`
+                    );
+                    remaining -= canApply;
+                }
             }
         }
 
@@ -575,22 +628,23 @@ async function adjustLot({ lotId, qtyChange, reason, user }) {
             err.status = 404;
             throw err;
         }
-        const balanceAfter = lot.qty_balance + change;
-        if (balanceAfter < 0) {
-            const err = new Error('ยอดคงเหลือหลังปรับปรุงติดลบ');
-            err.status = 400;
-            throw err;
-        }
-        await dbRun(`UPDATE stock_lots SET qty_balance = ?, status = ? WHERE id = ?`,
-            [balanceAfter, balanceAfter <= 0 ? 'depleted' : 'active', lotId]);
+        // เงื่อนไข "ยอดหลังปรับต้องไม่ติดลบ" ฝังอยู่ใน WHERE ของ UPDATE เอง (pattern กลาง — ดู
+        // concurrency.util.js) แทนที่จะเช็คจาก lot.qty_balance ที่อ่านไว้ก่อนหน้า (ค่าอาจเก่าไปแล้วถ้ามี
+        // คนอื่นปรับยอด lot เดียวกันคั่นกลางระหว่างนี้) — WHERE จะประเมินกับยอดจริง ณ เวลาที่เขียนเสมอ
+        await runGuardedUpdate(dbRun,
+            `UPDATE stock_lots SET qty_balance = qty_balance + ?, status = CASE WHEN qty_balance + ? <= 0 THEN 'depleted' ELSE 'active' END WHERE id = ? AND qty_balance + ? >= 0`,
+            [change, change, lotId, change],
+            'ยอดคงเหลือของ Lot นี้ถูกผู้ใช้อื่นปรับไปพร้อมกัน ทำให้การปรับครั้งนี้จะทำให้ยอดติดลบ กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง'
+        );
+        const updatedLot = await dbGet(`SELECT * FROM stock_lots WHERE id = ?`, [lotId]);
         await dbRun(`INSERT INTO stock_adjustments (lot_id, qty_change, reason, user) VALUES (?, ?, ?, ?)`,
             [lotId, change, reason || null, user || null]);
         await dbRun(
             `INSERT INTO stock_movements (drug_code, drug_name, lot_id, lot_no, movement_type, qty_change, balance_after, note, ref_type, ref_id)
              VALUES (?, ?, ?, ?, 'ADJUSTMENT', ?, ?, ?, 'adjustment', ?)`,
-            [lot.drug_code, lot.drug_name, lotId, lot.lot_no, change, balanceAfter, reason || null, lotId]
+            [lot.drug_code, lot.drug_name, lotId, lot.lot_no, change, updatedLot.qty_balance, reason || null, lotId]
         );
-        return { lotId, balanceAfter };
+        return { lotId, balanceAfter: updatedLot.qty_balance };
     });
 }
 

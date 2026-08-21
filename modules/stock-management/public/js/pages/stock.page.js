@@ -405,6 +405,12 @@ function populateRcvPickDrug() {
 }
 
 function addToReceiptCart() {
+    // กฎ: อ้างอิงใบเบิกได้ครั้งละใบเท่านั้น — ขณะเลือกใบเบิกอยู่ ห้ามเพิ่มรายการยาเองปนเข้าไป
+    // (รายการต้องมาจากใบเบิกที่เลือกเท่านั้น ไม่งั้นจะกลายเป็นรายการนอกใบเบิกปนกับใบเบิกที่อ้างอิง)
+    if (document.getElementById('receiptReqSelect').value) {
+        showToast('ขณะอ้างอิงใบเบิกอยู่ ไม่สามารถเพิ่มรายการยาเองได้ — เลือก "รับเข้าโดยไม่อ้างอิงใบเบิก" ก่อนหากต้องการเพิ่มรายการอื่น', 'error');
+        return;
+    }
     const code = document.getElementById('rcvPickDrug').value;
     const lotNo = document.getElementById('rcvPickLot').value.trim();
     const qty = Number(document.getElementById('rcvPickQty').value);
@@ -437,21 +443,27 @@ function removeFromReceiptCart(idx) {
     renderReceiptCart();
 }
 
-// แถวในตะกร้ายังแก้ Lot No./วันที่/จำนวน/ราคาได้ในตาราง — จำเป็นเพราะรายการที่เติมอัตโนมัติจากใบเบิก (onReceiptReqSelected)
+// แถวในตะกร้ายังแก้ Lot No./วันที่/ราคาได้ในตาราง — จำเป็นเพราะรายการที่เติมอัตโนมัติจากใบเบิก (onReceiptReqSelected)
 // รู้แค่ชนิดยา+จำนวนที่ค้าง แต่ Lot No./วันหมดอายุจริงต้องกรอกตามของจริงที่ได้รับในแต่ละครั้งเสมอ
+// ยกเว้น "จำนวน" (qty) — ถ้ารายการมาจากใบเบิก (sourceReqId ไม่ใช่ null) ห้ามแก้ไข ต้องล็อกตามยอดที่ระบบคำนวณให้
+// (จัดส่งแล้วแต่ยังไม่ได้ลงรับ) เท่านั้น เพื่อกันพิมพ์จำนวนผิดจากที่ระบบรู้จริง — ดู createReceipt ใน stock.db.js
+// ที่ตรวจซ้ำอีกชั้นเป็นตัวบังคับจริงฝั่ง backend
 function renderReceiptCart() {
     const tbody = document.getElementById('receiptCartBody');
     if (!receiptCart.length) { tbody.innerHTML = `<tr><td colspan="7" class="table-empty">ยังไม่มีรายการในตะกร้า</td></tr>`; return; }
-    tbody.innerHTML = receiptCart.map((it, idx) => `
+    tbody.innerHTML = receiptCart.map((it, idx) => {
+        const qtyLocked = it.sourceReqId !== null && it.sourceReqId !== undefined;
+        return `
         <tr>
             <td>${escapeHtml(it.drugName)}${it.strength ? ' (' + escapeHtml(it.strength) + ')' : ''}</td>
             <td><input type="text" value="${escapeHtml(it.lotNo)}" onchange="receiptCart[${idx}].lotNo=this.value"></td>
             <td><input type="text" id="cartMfg-${idx}" readonly></td>
             <td><input type="text" id="cartExp-${idx}" readonly></td>
-            <td><input type="number" min="1" step="1" value="${it.qty}" onchange="receiptCart[${idx}].qty=Number(this.value)"></td>
+            <td><input type="number" min="1" step="1" value="${it.qty}" ${qtyLocked ? 'readonly title="จำนวนถูกล็อกตามยอดที่จัดส่งมาจริงจากใบเบิก — แก้ไขไม่ได้" style="background:#f4f6f9;color:#586069;"' : ''} onchange="receiptCart[${idx}].qty=Number(this.value)"></td>
             <td><input type="number" min="0" step="0.01" value="${it.unitCost}" onchange="receiptCart[${idx}].unitCost=this.value"></td>
             <td><button class="line-item-remove" onclick="removeFromReceiptCart(${idx})">✕</button></td>
-        </tr>`).join('');
+        </tr>`;
+    }).join('');
     receiptCart.forEach((it, idx) => {
         const mfgEl = document.getElementById(`cartMfg-${idx}`);
         const expEl = document.getElementById(`cartExp-${idx}`);
@@ -473,20 +485,35 @@ async function loadRequisitionOptionsForReceipt() {
     } catch (err) {}
 }
 
+// เปิด/ปิดช่องเพิ่มรายการยาเอง (pick-drug panel) — ปิดไว้เสมอขณะอ้างอิงใบเบิก เพื่อบังคับว่ารายการทั้งใบ
+// ต้องมาจากใบเบิกที่เลือกเท่านั้น (กฎ: อ้างอิงใบเบิกได้ครั้งละใบ ห้ามมีรายการนอกใบเบิกปนมา)
+function setManualReceiptPickEnabled(enabled) {
+    ['rcvPickDrug', 'rcvPickLot', 'rcvPickQty', 'rcvPickCost', 'rcvPickMfg', 'rcvPickExp'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !enabled;
+    });
+}
+
 async function onReceiptReqSelected() {
     const reqId = document.getElementById('receiptReqSelect').value;
-    if (!reqId) return;
+
+    // แก้บั๊ก: เดิมกรองลบเฉพาะรายการที่ตรงกับใบเบิกที่เพิ่งเลือกใหม่ (sourceReqId === reqId) เท่านั้น
+    // ถ้าก่อนหน้านี้เคยเลือกใบเบิกอื่นไว้แล้ว รายการนั้นจะยังค้างอยู่ในตะกร้า แล้วถูกส่งไปพร้อม reqId ใหม่
+    // ตอนบันทึก กลายเป็นบันทึกรับเข้าใบเดียวที่อ้างอิงใบเบิกสองใบปนกัน — ตอนนี้เคลียร์ตะกร้าทั้งหมดทุกครั้ง
+    // ที่เปลี่ยนตัวเลือก (รวมถึงตอนเปลี่ยนกลับไป "ไม่อ้างอิงใบเบิก") บังคับให้บันทึกรับเข้าอ้างอิงใบเบิก
+    // ได้ครั้งละใบเท่านั้นเสมอ
+    receiptCart = [];
+    renderReceiptCart();
+    setManualReceiptPickEnabled(!reqId);
+
+    if (!reqId) return; // เลือก "รับเข้าโดยไม่อ้างอิงใบเบิก" — เคลียร์ตะกร้าแล้วปล่อยให้เพิ่มรายการเองได้ตามปกติ
+
     try {
         const detail = await apiGet(`/requisitions/${reqId}`);
         // สำคัญ: เติมเฉพาะยาที่ "จัดส่งมาแล้วจริง" แต่ยังไม่ได้ลงรับ (qty_shipped - qty_received)
         // ไม่ใช่ยอดที่ "เบิกไปแต่ยังไม่ส่ง" (qty_requested - qty_received) — ไม่งั้นจะลงรับของที่ยังไม่ได้ส่งมาได้
         const receivable = detail.items.filter(it => (it.qty_shipped - it.qty_received) > 0);
         const notYetShipped = detail.items.filter(it => (it.qty_shipped - it.qty_received) <= 0 && (it.qty_requested - it.qty_received) > 0);
-
-        // แก้บั๊ก: เลือกใบเบิกเดิมซ้ำ (หรือกลับมาเลือกใหม่หลังมีการจัดส่งเพิ่ม) เคยทำให้รายการถูกเติมซ้ำสะสมเพิ่มขึ้นเรื่อยๆ
-        // ตามจำนวนครั้งที่เลือก — ตอนนี้ล้างรายการเดิมที่เคยเติมมาจากใบเบิกใบนี้ (เทียบด้วย sourceReqId) ออกก่อนเสมอ
-        // แล้วเติมชุดใหม่แทน ไม่ใช่เพิ่มต่อท้าย — รายการที่เพิ่มเองด้วยมือ (sourceReqId เป็น null) ไม่ถูกแตะต้อง
-        receiptCart = receiptCart.filter(it => it.sourceReqId !== Number(reqId));
 
         if (!receivable.length) {
             showToast(
@@ -495,7 +522,6 @@ async function onReceiptReqSelected() {
                     : 'ใบเบิกนี้รับเข้าครบทุกรายการแล้ว',
                 'info'
             );
-            renderReceiptCart();
             return;
         }
         receivable.forEach(it => {
@@ -506,7 +532,7 @@ async function onReceiptReqSelected() {
             });
         });
         renderReceiptCart();
-        let msg = `เติมรายการยาลงตะกร้าแล้ว ${receivable.length} รายการ (เฉพาะที่จัดส่งมาแล้ว) — กรุณากรอก Lot No. และวันหมดอายุให้ครบก่อนบันทึก`;
+        let msg = `เติมรายการยาลงตะกร้าแล้ว ${receivable.length} รายการ (เฉพาะที่จัดส่งมาแล้ว) — กรุณากรอก Lot No. และวันหมดอายุให้ครบก่อนบันทึก จำนวนรับถูกล็อกตามยอดที่จัดส่งมาจริง แก้ไขเองไม่ได้`;
         if (notYetShipped.length) msg += ` — ยังมีอีก ${notYetShipped.length} รายการที่ค้างส่งอยู่ที่งานจัดซื้อ ยังไม่เติมให้`;
         showToast(msg, 'success');
     } catch (err) { showToast('ดึงรายการยาจากใบเบิกไม่สำเร็จ: ' + err.message, 'error'); }
@@ -927,9 +953,12 @@ async function saveManageOption(id) {
     const value = document.getElementById(`lo-value-${id}`).value.trim();
     const active = document.getElementById(`lo-active-${id}`).checked;
     if (!value) { showToast('กรุณาระบุค่าตัวเลือก', 'error'); return; }
+    // ส่ง version ของแถวที่โหลดไว้ตอน render กลับไปด้วย (window._lookupOptionMap) — backend ใช้เช็คว่ามีคนอื่น
+    // แก้ตัวเลือกนี้ไปก่อนหน้าหรือไม่ ถ้า version ไม่ตรงจะได้ error 409 กลับมาแทนการเขียนทับเงียบๆ
+    const version = window._lookupOptionMap?.[id]?.version;
     try {
         await fetch(`${API_BASE}/lookup-options/${id}`, {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value, active })
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value, active, version })
         }).then(async res => { if (!res.ok) throw new Error((await res.json()).error || 'บันทึกไม่สำเร็จ'); });
         showToast('บันทึกตัวเลือกสำเร็จ', 'success');
         await loadLookupOptions();
@@ -968,6 +997,9 @@ async function saveDrug() {
 
     try {
         if (editingDrugId) {
+            // ส่ง version ของแถวที่โหลดไว้ตอนเปิดฟอร์มแก้ไข (window._drugMap) กลับไปด้วย — backend ใช้เช็คว่ามี
+            // คนอื่นแก้ยารายการนี้ไปก่อนหน้าหรือไม่ ถ้า version ไม่ตรงจะได้ error 409 กลับมาแทนการเขียนทับเงียบๆ
+            payload.version = window._drugMap?.[editingDrugId]?.version;
             await fetch(`${API_BASE}/drugs/${editingDrugId}`, {
                 method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
             }).then(async res => { if (!res.ok) throw new Error((await res.json()).error || 'บันทึกไม่สำเร็จ'); });
@@ -1049,7 +1081,7 @@ async function clearTestData() {
 // เรียกใหม่ทุกมุมมองหลังข้อมูลถูกล้าง (จากปุ่มของตัวเอง หรือจาก event data:cleared ที่มาจากอีกฝั่ง)
 function reloadAllViews() {
     reqCart = []; renderReqCart();
-    receiptCart = []; renderReceiptCart();
+    receiptCart = []; renderReceiptCart(); setManualReceiptPickEnabled(true);
     loadRequisitions();
     loadRequisitionOptionsForReceipt();
     loadReceipts();

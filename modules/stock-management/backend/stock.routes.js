@@ -96,8 +96,8 @@ router.post('/lookup-options', async (req, res) => {
 
 router.put('/lookup-options/:id', async (req, res) => {
     try {
-        const { value, active } = req.body;
-        res.json(await stock.updateLookupOption(req.params.id, { value, active }));
+        const { value, active, version } = req.body;
+        res.json(await stock.updateLookupOption(req.params.id, { value, active, version }));
     } catch (err) { handleError(res, err, 'แก้ไขตัวเลือกไม่สำเร็จ'); }
 });
 
@@ -117,8 +117,8 @@ router.post('/drugs', async (req, res) => {
 
 router.put('/drugs/:id', async (req, res) => {
     try {
-        const { name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost, active } = req.body;
-        res.json(await stock.updateDrug(req.params.id, { name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost, active }));
+        const { name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost, active, version } = req.body;
+        res.json(await stock.updateDrug(req.params.id, { name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost, active, version }));
     } catch (err) { handleError(res, err, 'แก้ไขรายการยาไม่สำเร็จ'); }
 });
 

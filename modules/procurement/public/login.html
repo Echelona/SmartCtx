@@ -44,7 +44,7 @@
 <div class="login-card">
     <img src="/core/img/logo.png" alt="CatCode Studio" class="login-logo">
     <div class="brand">🛒 งานจัดซื้อ</div>
-    <div class="subbrand">SmartCtx — Smart Cytotoxic Admixture Service</div>
+    <div class="subbrand">SmartCtx — Smart Cytotoxic Admixture Service <span data-app-version></span></div>
 
     <div id="error-box" class="error-msg"></div>
 
@@ -62,6 +62,7 @@
     <a class="back-link" href="/">← กลับหน้าเลือกโมดูล</a>
 </div>
 
+<script src="/core/js/shared/appVersion.shared.js"></script>
 <script>
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
         e.preventDefault();
