@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "connect-sqlite3": "^0.9.13",
-    "dotenv": "^16.4.5",
+    "dotenv": "^16.6.1",
     "express": "^4.19.2",
     "express-session": "^1.18.0",
     "socket.io": "^4.7.5",

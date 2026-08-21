@@ -72,13 +72,38 @@
         overlayEl.querySelector('#sessionTimeoutExtendBtn').addEventListener('click', extendSession);
     }
 
-    function extendSession() {
+    async function extendSession() {
         clearInterval(countdownTimer);
-        if (overlayEl) { overlayEl.remove(); overlayEl = null; }
-        lastActivity = Date.now();
-        // ยิง request เบาๆ ไปฝั่ง server เพื่อต่ออายุ session cookie (rolling) ไม่ให้หมดอายุจริงระหว่างที่ผู้ใช้อ่าน popup อยู่
-        fetch(`/modules/${moduleKey}/api/auth/status`).catch(() => {});
-        scheduleWarning();
+        const btn = overlayEl?.querySelector('#sessionTimeoutExtendBtn');
+        if (btn) { btn.disabled = true; btn.textContent = 'กำลังต่ออายุ...'; }
+
+        // ยิง request ไปฝั่ง server เพื่อต่ออายุ session cookie (rolling) — และเช็คผลจริงว่า session
+        // ยังไม่หมดอายุไปก่อนหน้านี้ (เช่น แท็บถูก throttle ตอนไม่ได้โฟกัส ทำให้ popup โผล่ช้ากว่า
+        // cookie จริงที่หมดอายุไปแล้วฝั่ง server) ไม่ใช่แค่ยิงแล้วเชื่อว่าสำเร็จเฉยๆ
+        let authenticated = false;
+        try {
+            const res = await fetch(`/modules/${moduleKey}/api/auth/status`);
+            const data = await res.json();
+            authenticated = !!data.authenticated;
+        } catch (err) {
+            // เน็ตเวิร์กมีปัญหาชั่วคราว — ปล่อยให้ authenticated เป็น false แล้วลองใหม่ด้านล่าง ไม่ถือว่าต่ออายุสำเร็จ
+        }
+
+        if (authenticated) {
+            if (overlayEl) { overlayEl.remove(); overlayEl = null; }
+            lastActivity = Date.now();
+            scheduleWarning();
+        } else {
+            // session ตายไปแล้วจริงๆ ฝั่ง server (หรือเช็คไม่สำเร็จ) — บอกผู้ใช้ตรงๆ แล้วพาไป login
+            // แทนที่จะปิด popup แล้วทำเหมือนต่ออายุสำเร็จ ทั้งที่จริงๆ ผู้ใช้กลายเป็น anonymous session ไปแล้ว
+            if (overlayEl) {
+                overlayEl.querySelector('.session-timeout-box').innerHTML = `
+                    <h3>⚠️ Session หมดอายุแล้ว</h3>
+                    <p>กรุณาเข้าสู่ระบบใหม่อีกครั้ง</p>
+                `;
+            }
+            doLogout();
+        }
     }
 
     async function doLogout() {
