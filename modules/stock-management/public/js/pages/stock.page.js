@@ -294,6 +294,9 @@ async function toggleRequisitionHistoryDetail(id, idx) {
         row.querySelector('td').innerHTML = `
             <div class="expand-content">
                 ${detail.note ? `<p class="text-faint" style="margin-bottom:8px;">หมายเหตุ: ${escapeHtml(detail.note)}</p>` : ''}
+                ${detail.status === 'cancelled' ? `<p class="text-danger" style="margin-bottom:8px;">
+                    ยกเลิกโดย: ${escapeHtml(detail.cancelled_by || '-')} เมื่อ ${detail.cancelled_at ? new Date(detail.cancelled_at).toLocaleString('th-TH') : '-'}
+                </p>` : ''}
                 <table class="data-table">
                     <thead><tr><th>ยา</th><th>ความแรง</th><th style="text-align:right;">เบิก</th><th style="text-align:right;">จัดส่งแล้ว</th><th style="text-align:right;">รับแล้ว</th><th style="text-align:right;">ค้างจ่าย</th><th>หน่วย</th></tr></thead>
                     <tbody>${itemRows}</tbody>
@@ -304,14 +307,92 @@ async function toggleRequisitionHistoryDetail(id, idx) {
     }
 }
 
-async function cancelRequisition(id) {
-    if (!confirm('ยืนยันยกเลิกใบเบิกนี้หรือไม่?')) return;
-    try {
-        await apiPost(`/requisitions/${id}/cancel`, {});
-        showToast('ยกเลิกใบเบิกแล้ว', 'success');
-        loadRequisitions();
-        loadRequisitionOptionsForReceipt();
-    } catch (err) { showToast(err.message, 'error'); }
+// ===================== Modal ยืนยันรหัสผ่าน admin (ใช้ซ้ำได้กับทุก action ที่ต้องยืนยันสิทธิ์) =====================
+// ใช้ input type="password" จริง (mask ตัวอักษร) แทน prompt() ของเบราว์เซอร์ที่โชว์ข้อความเปิดเผย
+// เคลียร์ค่ารหัสผ่านออกจาก DOM ทันทีหลังใช้งาน (ไม่ปล่อยค้างใน input field)
+function ensurePasswordConfirmModal() {
+    if (document.getElementById('pwConfirmModal')) return;
+    const modal = document.createElement('div');
+    modal.id = 'pwConfirmModal';
+    modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;';
+    modal.innerHTML = `
+        <div style="background:var(--color-bg,#fff);border-radius:8px;padding:24px;max-width:360px;width:90%;box-shadow:0 8px 24px rgba(0,0,0,.2);">
+            <h3 id="pwConfirmTitle" style="margin:0 0 8px;font-size:16px;"></h3>
+            <p id="pwConfirmMessage" style="margin:0 0 16px;font-size:14px;color:var(--color-text-faint,#666);"></p>
+            <input type="password" id="pwConfirmInput" autocomplete="current-password"
+                   style="width:100%;box-sizing:border-box;padding:8px;margin-bottom:8px;border:1px solid #ccc;border-radius:4px;"
+                   placeholder="รหัสผ่าน admin">
+            <p id="pwConfirmError" style="display:none;color:var(--color-danger-text,#c0392b);font-size:13px;margin:0 0 12px;"></p>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button type="button" class="btn-outline btn-sm" id="pwConfirmCancelBtn">ยกเลิก</button>
+                <button type="button" class="btn-outline btn-sm" id="pwConfirmOkBtn"
+                        style="color:var(--color-danger-text,#c0392b);border-color:var(--color-danger-text,#c0392b);">ยืนยัน</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+
+    const input = modal.querySelector('#pwConfirmInput');
+    const errorEl = modal.querySelector('#pwConfirmError');
+    const okBtn = modal.querySelector('#pwConfirmOkBtn');
+    const cancelBtn = modal.querySelector('#pwConfirmCancelBtn');
+
+    function close() {
+        modal.style.display = 'none';
+        input.value = ''; // เคลียร์รหัสผ่านทันทีที่ปิด modal (ไม่ว่าจะสำเร็จหรือกดยกเลิก)
+        errorEl.style.display = 'none';
+        modal._onConfirm = null;
+    }
+    cancelBtn.addEventListener('click', close);
+    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+    document.addEventListener('keydown', (e) => {
+        if (modal.style.display === 'none') return;
+        if (e.key === 'Escape') close();
+        if (e.key === 'Enter' && document.activeElement === input) okBtn.click();
+    });
+
+    async function handleConfirm() {
+        const password = input.value;
+        if (!password) { errorEl.textContent = 'กรุณากรอกรหัสผ่าน'; errorEl.style.display = 'block'; return; }
+        okBtn.disabled = true; cancelBtn.disabled = true; okBtn.textContent = 'กำลังตรวจสอบ...';
+        try {
+            await modal._onConfirm(password);
+            close();
+        } catch (err) {
+            errorEl.textContent = err.message || 'ยืนยันไม่สำเร็จ';
+            errorEl.style.display = 'block';
+            input.value = ''; // กรอกผิด — เคลียร์ให้กรอกใหม่ ไม่ค้างของเดิมไว้
+            input.focus();
+        } finally {
+            okBtn.disabled = false; cancelBtn.disabled = false; okBtn.textContent = 'ยืนยัน';
+        }
+    }
+    okBtn.addEventListener('click', handleConfirm);
+}
+
+// เปิด modal — onConfirm(password) ต้อง throw Error(message) ถ้าไม่สำเร็จ (modal จะเปิดค้างให้กรอกใหม่แทนที่จะปิดไปเฉยๆ)
+function openPasswordConfirm(title, message, onConfirm) {
+    ensurePasswordConfirmModal();
+    const modal = document.getElementById('pwConfirmModal');
+    modal.querySelector('#pwConfirmTitle').textContent = title;
+    modal.querySelector('#pwConfirmMessage').textContent = message;
+    modal.querySelector('#pwConfirmError').style.display = 'none';
+    modal.querySelector('#pwConfirmInput').value = '';
+    modal._onConfirm = onConfirm;
+    modal.style.display = 'flex';
+    setTimeout(() => modal.querySelector('#pwConfirmInput').focus(), 50);
+}
+
+function cancelRequisition(id) {
+    openPasswordConfirm(
+        'ยืนยันยกเลิกใบเบิก',
+        'การยกเลิกไม่สามารถย้อนกลับได้ กรุณากรอกรหัสผ่าน admin เพื่อยืนยัน',
+        async (password) => {
+            await apiPost(`/requisitions/${id}/cancel`, { password });
+            showToast('ยกเลิกใบเบิกแล้ว', 'success');
+            loadRequisitions();
+            loadRequisitionOptionsForReceipt();
+        }
+    );
 }
 
 // ===================== TAB: รับเข้าคลัง =====================

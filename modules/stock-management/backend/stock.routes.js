@@ -38,6 +38,37 @@ function validateDateRangeQuery(from, to) {
     }
 }
 
+// ---------- Rate limit: กันเดารหัสผ่านยกเลิกใบเบิกซ้ำๆ (in-memory, ต่อ session) ----------
+// หมายเหตุ: เก็บใน memory ของ process เดียว ถ้ารันหลาย instance (cluster/load balancer หลายเครื่อง)
+// จะไม่ sync กัน แต่ละ instance นับแยกกัน — เพียงพอสำหรับ deploy แบบ single process ตอนนี้
+const cancelAttempts = new Map(); // sessionID -> { count, lockUntil }
+const MAX_CANCEL_ATTEMPTS = 5;
+const CANCEL_LOCK_MS = 5 * 60 * 1000; // ล็อก 5 นาทีเมื่อผิดครบจำนวน
+
+function checkCancelRateLimit(req) {
+    const key = req.sessionID;
+    const entry = cancelAttempts.get(key);
+    if (entry?.lockUntil && Date.now() < entry.lockUntil) {
+        const secondsLeft = Math.ceil((entry.lockUntil - Date.now()) / 1000);
+        const err = new Error(`กรอกรหัสผ่านผิดหลายครั้งเกินไป กรุณาลองใหม่ในอีก ${secondsLeft} วินาที`);
+        err.status = 429;
+        throw err;
+    }
+}
+function recordCancelFailure(req) {
+    const key = req.sessionID;
+    const entry = cancelAttempts.get(key) || { count: 0 };
+    entry.count += 1;
+    if (entry.count >= MAX_CANCEL_ATTEMPTS) {
+        entry.lockUntil = Date.now() + CANCEL_LOCK_MS;
+        entry.count = 0;
+    }
+    cancelAttempts.set(key, entry);
+}
+function recordCancelSuccess(req) {
+    cancelAttempts.delete(req.sessionID);
+}
+
 // ---------- ล้างข้อมูลทดสอบ (เฉพาะช่วงทดสอบระบบ — ต้องมีรหัสผ่านแยกต่างหากจาก login ปกติ) ----------
 
 router.post('/admin/clear-test-data', async (req, res) => {
@@ -128,8 +159,16 @@ router.get('/requisitions/:id', async (req, res) => {
 });
 
 router.post('/requisitions/:id/cancel', async (req, res) => {
-    try { res.json(await stock.cancelRequisition(req.params.id)); }
-    catch (err) { handleError(res, err, 'ยกเลิกใบเบิกไม่สำเร็จ'); }
+    try {
+        checkCancelRateLimit(req);
+        const { password } = req.body;
+        const result = await stock.cancelRequisition(req.params.id, password, getUser(req));
+        recordCancelSuccess(req);
+        res.json(result);
+    } catch (err) {
+        if (err.status === 403) recordCancelFailure(req);
+        handleError(res, err, 'ยกเลิกใบเบิกไม่สำเร็จ');
+    }
 });
 
 // ---------- Receipts (รับเข้าตามใบส่งของ) ----------

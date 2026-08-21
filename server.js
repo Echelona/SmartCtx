@@ -110,7 +110,7 @@ app.use('/modules/pharm-care-unit', pharmCareAuth.requireAuth, express.static(pa
 // เพื่อรีเฟรชข้อมูลทันทีที่มีการเปลี่ยนแปลงจริง แทนที่จะพึ่ง polling ทุกกี่วินาทีเพียงอย่างเดียว
 // เนื้อหาที่ส่งผ่าน socket มีแค่ id/เลขที่เอกสาร (ไม่ใช่ข้อมูลเต็ม) — ฝั่งรับต้อง fetch ผ่าน REST API
 // ที่มี auth ตามปกติเพื่อเอาข้อมูลจริง จึงไม่มีความเสี่ยงข้อมูลรั่วข้ามโมดูลผ่าน socket
-['requisition:created', 'shipment:created', 'receipt:created', 'drug:changed', 'data:cleared', 'lookup:changed'].forEach(eventName => {
+['requisition:created', 'shipment:created', 'receipt:created', 'requisition:cancelled', 'drug:changed', 'data:cleared', 'lookup:changed'].forEach(eventName => {
     eventBus.on(eventName, (payload) => io.emit(eventName, payload));
 });
 

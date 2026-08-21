@@ -3,6 +3,7 @@
  * ส่งรายการจัดซื้อ (สร้างใบเบิก) ไปให้งานจัดซื้อ (1.1) แล้วรับเข้าตามใบส่งของ — อาจมีค้างจ่าย (partial)
  */
 
+const crypto = require('crypto');
 const { dbRun, dbGet, dbAll, withTransaction, nextDocNumber, ready } = require('../../_shared/backend/warehouseSchema.db');
 const { CHEMO_DRUG_REFERENCE, LOOKUP_SEED_DATA } = require('../../../shared-data/chemoDrugs.data');
 const eventBus = require('../../_shared/backend/eventBus.util');
@@ -83,11 +84,21 @@ async function seedLookupOptionsIfEmpty() {
     }
     console.log('stock.db: seed ตัวเลือก dropdown เริ่มต้น (หน่วย/ขนาดบรรจุ/หน่วยความแรง/หมวดหมู่) เสร็จแล้ว (ครั้งแรกเท่านั้น)');
 }
-// รัน seed ทั้งสองชุดตามลำดับเสมอ (ห้ามยิงพร้อมกัน) — sqlite connection เดียวรองรับ transaction ซ้อนกันไม่ได้
+// ---------- Migration: เพิ่มคอลัมน์ audit สำหรับการยกเลิกใบเบิก (เผื่อ DB เก่ายังไม่มี) ----------
+async function ensureCancelAuditColumns() {
+    await ready;
+    const cols = await dbAll(`PRAGMA table_info(requisitions)`);
+    const names = cols.map(c => c.name);
+    if (!names.includes('cancelled_by')) await dbRun(`ALTER TABLE requisitions ADD COLUMN cancelled_by TEXT`);
+    if (!names.includes('cancelled_at')) await dbRun(`ALTER TABLE requisitions ADD COLUMN cancelled_at TEXT`);
+}
+
+// รัน seed/migration ทั้งหมดตามลำดับเสมอ (ห้ามยิงพร้อมกัน) — sqlite connection เดียวรองรับ transaction ซ้อนกันไม่ได้
 // (เจอบั๊กจริง: "cannot start a transaction within a transaction" ตอนสอง seed function เริ่มพร้อมกันแบบไม่ chain)
 (async () => {
     try { await seedDrugMasterIfEmpty(); } catch (err) { console.error('seed drug_master ไม่สำเร็จ:', err); }
     try { await seedLookupOptionsIfEmpty(); } catch (err) { console.error('seed lookup_options ไม่สำเร็จ:', err); }
+    try { await ensureCancelAuditColumns(); } catch (err) { console.error('migrate cancel-audit columns ไม่สำเร็จ:', err); }
 })();
 
 async function listLookupOptions(listType, { activeOnly } = {}) {
@@ -311,7 +322,25 @@ async function getRequisition(id) {
     return { ...r, items, shipStatus: computeShipStatus(items) };
 }
 
-async function cancelRequisition(id) {
+// เทียบรหัสผ่านแบบ timing-safe — !== ธรรมดาจะ short-circuit ตัวแรกที่ไม่ตรง ทำให้เวลาตอบสนอง
+// สั้น/ยาวต่างกันตามจำนวนตัวอักษรที่ตรง เป็นช่องโหว่ให้เดารหัสผ่านทีละตัวได้ (timing attack)
+function verifyPassword(input, expected) {
+    if (!input || !expected) return false;
+    const a = Buffer.from(String(input));
+    const b = Buffer.from(String(expected));
+    if (a.length !== b.length) return false; // timingSafeEqual ต้องการ buffer ยาวเท่ากันเท่านั้น
+    return crypto.timingSafeEqual(a, b);
+}
+
+// ยกเลิกใบเบิก — ต้องยืนยันด้วยรหัสผ่านแยกต่างหาก (CANCEL_REQ_PASSWORD, ไม่ใช่รหัส login ปกติ)
+// เพราะเป็น action ที่กระทบฝั่งงานจัดซื้อโดยตรงและย้อนกลับไม่ได้ — บันทึกผู้ยกเลิก/เวลาไว้เป็น audit
+// cancelledBy ควรมาจาก session ของผู้ใช้ที่ login อยู่ (ดู getUser(req) ใน stock.routes.js) ไม่ใช่ค่าที่ client กำหนดเอง
+async function cancelRequisition(id, password, cancelledBy) {
+    if (!verifyPassword(password, process.env.CANCEL_REQ_PASSWORD)) {
+        const err = new Error('รหัสผ่านไม่ถูกต้อง — ไม่ได้รับอนุญาตให้ยกเลิกใบเบิก');
+        err.status = 403;
+        throw err;
+    }
     const r = await dbGet(`SELECT * FROM requisitions WHERE id = ?`, [id]);
     if (!r) {
         const err = new Error('ไม่พบใบเบิกที่ระบุ');
@@ -323,7 +352,14 @@ async function cancelRequisition(id) {
         err.status = 409;
         throw err;
     }
-    await dbRun(`UPDATE requisitions SET status = 'cancelled' WHERE id = ?`, [id]);
+    const now = new Date().toISOString();
+    await dbRun(
+        `UPDATE requisitions SET status = 'cancelled', cancelled_by = ?, cancelled_at = ? WHERE id = ?`,
+        [cancelledBy || null, now, id]
+    );
+    // แจ้งฝั่งงานจัดซื้อ (procurement) แบบ realtime ว่าใบเบิกนี้ถูกยกเลิกแล้ว
+    // — ไม่งั้นสถานะที่ DB เปลี่ยนถูกต้อง แต่ UI ฝั่งจัดซื้อจะไม่รีเฟรชจนกว่าจะโหลดข้อมูลใหม่เอง
+    eventBus.emit('requisition:cancelled', { id: Number(id), req_no: r.req_no });
     return getRequisition(id);
 }
 

@@ -86,6 +86,7 @@ function initTabs() {
 // ===================== รายการใบเบิก =====================
 let requisitionCache = [];
 let openRowIdx = null;
+let openReqId = null; // ใบเบิก (id) ที่กำลังเปิดฟอร์มจัดส่งอยู่ ณ ตอนนี้ — ใช้เช็คตอนมี event requisition:cancelled เข้ามา
 
 async function loadRequisitionList() {
     try {
@@ -138,9 +139,10 @@ function renderRequisitionList() {
 async function toggleDetail(reqId, idx) {
     const row = document.getElementById(`row-${idx}`);
     if (!row) return;
-    if (openRowIdx === idx) { row.style.display = 'none'; openRowIdx = null; return; }
+    if (openRowIdx === idx) { row.style.display = 'none'; openRowIdx = null; openReqId = null; return; }
     document.querySelectorAll('.expand-row').forEach(r => r.style.display = 'none');
     openRowIdx = idx;
+    openReqId = reqId;
     row.querySelector('td').innerHTML = `<div class="expand-content">กำลังโหลด...</div>`;
     row.style.display = 'table-row';
     try {
@@ -159,10 +161,14 @@ function renderReadOnly(row, detail) {
             <span>ขอเบิก ${formatNumber(it.qty_requested)} ${escapeHtml(it.unit || '')}</span>
             <span>จัดส่งแล้ว ${formatNumber(it.qty_shipped)}</span>
         </div>`).join('');
+    const cancelNotice = detail.status === 'cancelled'
+        ? `<p class="text-danger" style="margin:8px 0;">ยกเลิกโดย: ${escapeHtml(detail.cancelled_by || '-')} เมื่อ ${detail.cancelled_at ? new Date(detail.cancelled_at).toLocaleString('th-TH') : '-'}</p>`
+        : '';
     row.querySelector('td').innerHTML = `
         <div class="expand-content ship-form">
             <div class="ship-form-header"><strong>รายการยาในใบเบิก ${escapeHtml(detail.req_no)}</strong>
                 <span class="status-pill ${shipStatusClass(detail.shipStatus)}">${shipStatusLabel(detail.shipStatus)}</span></div>
+            ${cancelNotice}
             <div class="line-items">
                 <div class="ship-item-row view-only header-row"><span>ยา</span><span>ขอเบิก</span><span>จัดส่งแล้ว</span></div>
                 ${itemRows}
@@ -373,10 +379,27 @@ document.addEventListener('DOMContentLoaded', () => {
         const refreshIfIdle = () => { if (openRowIdx === null) loadRequisitionList(); };
         socket.on('requisition:created', refreshIfIdle);
         socket.on('receipt:created', refreshIfIdle);
+
+        // ใบเบิกถูกยกเลิกจากฝั่งงานคลังเคมีบำบัด — ถ้าเป็นใบที่กำลังเปิดฟอร์มจัดส่งค้างอยู่พอดี
+        // ต้องปิดฟอร์มทันที ไม่งั้นกดยืนยันจัดส่งไปจะเจอ error (ใบเบิกไม่ใช่สถานะ pending แล้ว)
+        // เคสอื่น (ไม่ใช่แถวที่เปิดอยู่ หรือไม่ได้เปิดแถวไหนเลย) ก็แค่รีเฟรชรายการตามปกติเหมือน event อื่นๆ
+        socket.on('requisition:cancelled', (payload) => {
+            if (openRowIdx !== null && payload?.id === openReqId) {
+                document.getElementById(`row-${openRowIdx}`).style.display = 'none';
+                openRowIdx = null;
+                openReqId = null;
+                showToast(`ใบเบิก ${payload.req_no || ''} ถูกยกเลิกจากฝั่งงานคลังเคมีบำบัด`, 'info');
+                loadRequisitionList();
+                return;
+            }
+            refreshIfIdle();
+        });
+
         socket.on('data:cleared', () => {
             showToast('ข้อมูลถูกล้างจากฝั่งงานคลังเคมีบำบัด — รีเฟรชข้อมูลแล้ว', 'info');
             document.querySelectorAll('.expand-row').forEach(r => r.style.display = 'none');
             openRowIdx = null;
+            openReqId = null;
             loadRequisitionList();
             loadShipmentHistory();
         });
