@@ -78,6 +78,14 @@ router.post('/admin/clear-test-data', async (req, res) => {
     } catch (err) { handleError(res, err, 'ล้างข้อมูลทดสอบไม่สำเร็จ'); }
 });
 
+// ---------- Checkpoint ฐานข้อมูล (WAL → ไฟล์หลัก) — ใช้ก่อนสำรอง/ย้ายฐานข้อมูล ----------
+// ไม่ใช่การลบข้อมูล (ไม่ต้องใช้รหัสผ่านยืนยันแบบ clear-test-data) แค่รวมข้อมูลจากไฟล์ WAL เข้าไฟล์
+// warehouse.db หลัก ทำให้สำรอง/ย้ายได้แค่ไฟล์เดียว ไม่ต้อง zip รวม -wal/-shm ไปด้วย
+router.post('/admin/checkpoint-database', async (req, res) => {
+    try { res.json(await stock.checkpointDatabase()); }
+    catch (err) { handleError(res, err, 'Checkpoint ฐานข้อมูลไม่สำเร็จ'); }
+});
+
 // ---------- Lookup options (หน่วย / ขนาดบรรจุ / หน่วยความแรง / หมวดหมู่) ----------
 
 router.get('/lookup-options', async (req, res) => {

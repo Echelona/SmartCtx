@@ -4,7 +4,7 @@
  */
 
 const crypto = require('crypto');
-const { dbRun, dbGet, dbAll, withTransaction, nextDocNumber, ready } = require('../../_shared/backend/warehouseSchema.db');
+const { dbRun, dbGet, dbAll, withTransaction, nextDocNumber, ready, checkpointDatabase } = require('../../_shared/backend/warehouseSchema.db');
 const { CHEMO_DRUG_REFERENCE, LOOKUP_SEED_DATA } = require('../../../shared-data/chemoDrugs.data');
 const eventBus = require('../../_shared/backend/eventBus.util');
 const { runGuardedUpdate } = require('../../_shared/backend/concurrency.util');
@@ -826,6 +826,7 @@ async function clearTestData(password) {
 
 module.exports = {
     clearTestData,
+    checkpointDatabase,
     listLookupOptions,
     createLookupOption,
     updateLookupOption,

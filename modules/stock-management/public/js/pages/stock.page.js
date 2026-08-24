@@ -1331,6 +1331,19 @@ async function hardDeleteDrugItem(id, drugName) {
     } catch (err) { if (!err.sessionExpired) showToast(err.message, 'error'); }
 }
 
+// ===================== บำรุงรักษาฐานข้อมูล: Checkpoint WAL → ไฟล์หลัก =====================
+// ไม่ลบข้อมูลใดๆ แค่รวมไฟล์ WAL เข้าไฟล์ warehouse.db หลัก ให้สำรอง/ย้ายได้ไฟล์เดียวจบ ไม่ต้อง zip
+async function checkpointDatabase() {
+    try {
+        const result = await apiPost('/admin/checkpoint-database');
+        if (result.busy) {
+            showToast('Checkpoint สำเร็จบางส่วน (มีการเชื่อมต่ออื่นใช้งานอยู่พร้อมกัน) ลองกดซ้ำอีกครั้งถ้าจำเป็น', 'info');
+        } else {
+            showToast(`Checkpoint สำเร็จ — รวมข้อมูล ${result.checkpointedPages ?? 0} หน้าเข้าไฟล์หลักแล้ว พร้อมสำรอง/ย้ายไฟล์เดียวได้`, 'success');
+        }
+    } catch (err) { if (!err.sessionExpired) showToast(err.message, 'error'); }
+}
+
 // ===================== Danger Zone: ล้างข้อมูลทดสอบ =====================
 async function clearTestData() {
     const password = document.getElementById('clearPassword').value;

@@ -359,7 +359,22 @@
 
     <!-- TAB: ล้างข้อมูลทดสอบ (Danger Zone — ใช้เฉพาะช่วงทดสอบระบบ) -->
     <section class="tab-panel" id="tab-danger">
-        <div class="card danger-zone">
+        <div class="card">
+            <div class="card-header"><h2>💾 บำรุงรักษาฐานข้อมูล</h2></div>
+            <div class="card-body">
+                <p style="margin:0 0 12px;">
+                    ฐานข้อมูลเปิดแบบ WAL mode — ข้อมูลที่เพิ่งบันทึกล่าสุดจะถูกเก็บไว้ในไฟล์แยก
+                    (<code>warehouse.db-wal</code>) ก่อน ยังไม่รวมเข้าไฟล์ <code>warehouse.db</code> หลักทันที
+                    ถ้าสำรอง/ย้ายไฟล์แค่ <code>warehouse.db</code> ไฟล์เดียวโดยไม่ได้เอา <code>-wal</code>/<code>-shm</code>
+                    ไปด้วย ข้อมูลล่าสุดอาจหายไป — กดปุ่มนี้ก่อนสำรอง/ย้ายฐานข้อมูลทุกครั้ง เพื่อรวมข้อมูลเข้าไฟล์หลักให้
+                    <strong>ครบในไฟล์เดียว ไม่ต้อง zip รวมหลายไฟล์</strong> ปุ่มนี้ไม่ลบข้อมูลใดๆ ทั้งสิ้น ปลอดภัย
+                    กดได้ตลอดเวลา
+                </p>
+                <button class="btn-primary" onclick="checkpointDatabase()">📀 Checkpoint ฐานข้อมูล (รวม WAL เข้าไฟล์หลัก)</button>
+            </div>
+        </div>
+
+        <div class="card danger-zone" style="margin-top:16px;">
             <div class="card-header"><h2>🧹 ล้างประวัติการทำรายการทั้งหมด</h2></div>
             <div class="card-body">
                 <p class="danger-warning">

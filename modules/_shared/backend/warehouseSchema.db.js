@@ -253,4 +253,25 @@ const ready = new Promise((resolve, reject) => {
     });
 });
 
-module.exports = { db, dbRun, dbGet, dbAll, withTransaction, nextDocNumber, ready, DB_PATH };
+// ---------- Checkpoint WAL เข้าไฟล์หลัก (ใช้ก่อนสำรอง/ย้ายฐานข้อมูล) ----------
+// เพราะเปิดแบบ WAL mode ไว้ (ดู PRAGMA journal_mode = WAL ด้านบน) ข้อมูลที่เพิ่งเขียนล่าสุดจะยังไม่ถูก
+// merge เข้าไฟล์ warehouse.db หลักทันที แต่จะอยู่ในไฟล์แยก warehouse.db-wal ก่อน ถ้า copy/สำรองแค่ไฟล์
+// warehouse.db ไฟล์เดียวโดยไม่ได้เอา -wal/-shm ไปด้วย ข้อมูลล่าสุดจะหายไป — ฟังก์ชันนี้สั่ง SQLite รวม
+// ข้อมูลทั้งหมดจาก WAL เข้าไฟล์หลักแล้วเคลียร์ WAL ให้ว่าง (TRUNCATE) ทำให้หลังรันแล้ว copy/backup แค่ไฟล์
+// warehouse.db ไฟล์เดียวก็ได้ข้อมูลครบ ไม่ต้อง zip รวมไฟล์ -wal/-shm ไปด้วย
+function checkpointDatabase() {
+    return new Promise((resolve, reject) => {
+        db.get('PRAGMA wal_checkpoint(TRUNCATE)', (err, row) => {
+            if (err) return reject(err);
+            // row: { busy, log, checkpointed } — busy=1 หมายถึงมี connection อื่นค้างอยู่ ทำให้ checkpoint
+            // ไม่ครบ (บางส่วนอาจยังเหลือใน WAL) — log/checkpointed คือจำนวนหน้าทั้งหมด/ที่ merge ไปแล้ว
+            resolve({
+                busy: !!row?.busy,
+                totalPages: row?.log ?? 0,
+                checkpointedPages: row?.checkpointed ?? 0
+            });
+        });
+    });
+}
+
+module.exports = { db, dbRun, dbGet, dbAll, withTransaction, nextDocNumber, ready, DB_PATH, checkpointDatabase };
