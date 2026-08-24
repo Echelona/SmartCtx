@@ -110,21 +110,51 @@ router.get('/drugs', async (req, res) => {
 
 router.post('/drugs', async (req, res) => {
     try {
-        const { drugCode, name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost } = req.body;
-        res.status(201).json(await stock.createDrug({ drugCode, name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost }));
+        const {
+            drugCode, name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost,
+            tradeName, drugType, dosageForm, remark, concBeforeMix, shelfLifeAfterOpen, maxConcAfterMix, diluent,
+            compatibleDrugs, incompatibleDrugs, sellingPrice, minStockQty, maxStockQty
+        } = req.body;
+        res.status(201).json(await stock.createDrug({
+            drugCode, name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost,
+            tradeName, drugType, dosageForm, remark, concBeforeMix, shelfLifeAfterOpen, maxConcAfterMix, diluent,
+            compatibleDrugs, incompatibleDrugs, sellingPrice, minStockQty, maxStockQty
+        }));
     } catch (err) { handleError(res, err, 'เพิ่มรายการยาไม่สำเร็จ'); }
 });
 
 router.put('/drugs/:id', async (req, res) => {
     try {
-        const { name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost, active, version } = req.body;
-        res.json(await stock.updateDrug(req.params.id, { name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost, active, version }));
+        const {
+            name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost, active, version,
+            tradeName, drugType, dosageForm, remark, concBeforeMix, shelfLifeAfterOpen, maxConcAfterMix, diluent,
+            compatibleDrugs, incompatibleDrugs, sellingPrice, minStockQty, maxStockQty
+        } = req.body;
+        res.json(await stock.updateDrug(req.params.id, {
+            name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost, active, version,
+            tradeName, drugType, dosageForm, remark, concBeforeMix, shelfLifeAfterOpen, maxConcAfterMix, diluent,
+            compatibleDrugs, incompatibleDrugs, sellingPrice, minStockQty, maxStockQty
+        }));
     } catch (err) { handleError(res, err, 'แก้ไขรายการยาไม่สำเร็จ'); }
 });
 
 router.delete('/drugs/:id', async (req, res) => {
     try { res.json(await stock.deleteDrug(req.params.id)); }
     catch (err) { handleError(res, err, 'ลบรายการยาไม่สำเร็จ'); }
+});
+
+// ลบถาวรจริง (ลบแถวออกจากตาราง) — แยกจาก DELETE /drugs/:id ด้านบนซึ่งเป็น soft-delete (ปิดใช้งาน) เท่านั้น
+router.delete('/drugs/:id/permanent', async (req, res) => {
+    try {
+        const { password } = req.body;
+        res.json(await stock.hardDeleteDrug(req.params.id, password));
+    } catch (err) { handleError(res, err, 'ลบรายการยาถาวรไม่สำเร็จ'); }
+});
+
+// เปิดใช้งานกลับรายการยาที่เคยปิดใช้งาน (soft-deleted) — undo ของ DELETE /drugs/:id
+router.post('/drugs/:id/reactivate', async (req, res) => {
+    try { res.json(await stock.reactivateDrug(req.params.id)); }
+    catch (err) { handleError(res, err, 'เปิดใช้งานรายการยาไม่สำเร็จ'); }
 });
 
 // ---------- Requisitions (รายการจัดซื้อที่ส่งไปให้งานจัดซื้อ) ----------

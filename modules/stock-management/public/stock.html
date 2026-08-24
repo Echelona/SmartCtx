@@ -226,8 +226,8 @@
                 <div class="add-drug-form" id="add-drug-form">
                     <h3 id="drug-form-title">เพิ่มรายการยา</h3>
                     <div class="drug-form-grid">
-                        <div class="form-group"><label>รหัสยา (Code)</label><input type="text" id="d-code" placeholder="เช่น CISPLATIN-50"></div>
-                        <div class="form-group"><label>ชื่อยา (Item)</label><input type="text" id="d-name" placeholder="เช่น Cisplatin"></div>
+                        <div class="form-group"><label>รหัสยา (Code)</label><input type="text" id="d-code" placeholder="เช่น CISPLATIN-50" style="text-transform:uppercase;" oninput="this.value = this.value.toUpperCase();"></div>
+                        <div class="form-group"><label>ชื่อยา (Item)</label><input type="text" id="d-name" placeholder="เช่น Cisplatin" oninput="updateDrugDetailTitle()"></div>
                         <div class="form-group"><label>ค่าความแรง (ตัวเลข)</label><input type="number" step="any" id="d-strength-value" placeholder="เช่น 50" onchange="updateStrengthPreview()"></div>
                         <div class="form-group">
                             <label>หน่วยความแรง</label>
@@ -248,7 +248,69 @@
                             <label>หน่วย</label>
                             <select id="d-unit" onchange="onLookupSelectChange('d-unit', 'unit')"></select>
                         </div>
-                        <div class="form-group"><label>ราคาต่อหน่วย (ถ้ามี)</label><input type="number" step="0.01" id="d-cost"></div>
+                        <div class="form-group"><label>ราคาทุน (ถ้ามี)</label><input type="number" step="0.01" id="d-cost"></div>
+                        <div class="form-group"><label>ราคาขาย (ถ้ามี)</label><input type="number" step="0.01" id="d-selling-price"></div>
+                    </div>
+                    <h3 id="drug-detail-title" style="margin-top:16px;">รายละเอียดยา</h3>
+                    <div class="drug-form-grid">
+                        <div class="form-group"><label>Trade name</label><input type="text" id="d-trade-name" placeholder="เช่น Kemocarb"></div>
+                        <div class="form-group">
+                            <label>ประเภทยา</label>
+                            <select id="d-drug-type" onchange="onLookupSelectChange('d-drug-type', 'drug_type')"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>รูปแบบของยา</label>
+                            <select id="d-dosage-form" onchange="onLookupSelectChange('d-dosage-form', 'dosage_form')"></select>
+                        </div>
+                        <div class="form-group"><label>หมายเหตุ/แหล่งจัดหา</label><input type="text" id="d-remark" placeholder="เช่น รพ., สปสช., ปกส., จัดหาเฉพาะราย"></div>
+                        <div class="form-group">
+                            <label>Conc.ก่อนผสม (mg/ml) — คำนวณอัตโนมัติจากความแรง ÷ ขนาดบรรจุ</label>
+                            <input type="text" id="d-conc-before" readonly style="background:var(--color-bg-subtle,#f0f0f0); cursor:not-allowed;">
+                        </div>
+                        <div class="form-group"><label>อายุหลังเปิดขวดยา (วัน)</label><input type="text" id="d-shelf-life" placeholder="เช่น 15"></div>
+                        <div class="form-group">
+                            <label>Max conc.หลังผสม (mg/ml) — ช่วง</label>
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <input type="text" id="d-max-conc-min" placeholder="จาก เช่น 0.5" style="width:90px;">
+                                <span>-</span>
+                                <input type="text" id="d-max-conc-max" placeholder="ถึง เช่น 10" style="width:90px;">
+                            </div>
+                        </div>
+                        <div class="form-group"><label>Min stock (vial)</label><input type="number" step="any" id="d-min-stock"></div>
+                        <div class="form-group"><label>Max stock (vial)</label><input type="number" step="any" id="d-max-stock"></div>
+                    </div>
+
+                    <div style="margin-top:16px; padding:14px 16px; border:1px solid var(--color-border,#e2e2e2); border-radius:10px; background:var(--color-bg-subtle,#fafafa);">
+                        <div class="form-group" style="margin-bottom:14px;">
+                            <label>💧 Dilution (Solvent)</label>
+                            <div class="chip-input" id="d-diluent-chips" style="display:flex; flex-wrap:wrap; align-content:flex-start; gap:6px; min-height:36px; padding:6px 8px; border:1px solid var(--color-border,#ddd); border-radius:6px; background:#fff;"></div>
+                            <div style="display:flex; gap:6px; margin-top:6px;">
+                                <input type="text" id="d-diluent-input" placeholder="พิมพ์แล้วกด Enter หรือ +" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addChipValue('diluent');}">
+                                <button type="button" class="btn-outline btn-sm" onclick="addChipValue('diluent')">+ เพิ่ม</button>
+                            </div>
+                            <input type="hidden" id="d-diluent">
+                        </div>
+
+                        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px;">
+                            <div class="form-group" style="margin:0;">
+                                <label style="color:#1a7f37;">✅ Compatible</label>
+                                <div class="chip-input" id="d-compatible-chips" style="display:flex; flex-wrap:wrap; align-content:flex-start; gap:6px; min-height:68px; padding:6px 8px; border:1px solid #b7dfc1; border-radius:6px; background:#fff;"></div>
+                                <div style="display:flex; gap:6px; margin-top:6px;">
+                                    <input type="text" id="d-compatible-input" placeholder="พิมพ์แล้วกด Enter หรือ +" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addChipValue('compatible');}">
+                                    <button type="button" class="btn-outline btn-sm" onclick="addChipValue('compatible')">+ เพิ่ม</button>
+                                </div>
+                                <input type="hidden" id="d-compatible">
+                            </div>
+                            <div class="form-group" style="margin:0;">
+                                <label style="color:#c0392b;">🚫 Incompatible</label>
+                                <div class="chip-input" id="d-incompatible-chips" style="display:flex; flex-wrap:wrap; align-content:flex-start; gap:6px; min-height:68px; padding:6px 8px; border:1px solid #f0b8b0; border-radius:6px; background:#fff;"></div>
+                                <div style="display:flex; gap:6px; margin-top:6px;">
+                                    <input type="text" id="d-incompatible-input" placeholder="พิมพ์แล้วกด Enter หรือ +" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addChipValue('incompatible');}">
+                                    <button type="button" class="btn-outline btn-sm" onclick="addChipValue('incompatible')">+ เพิ่ม</button>
+                                </div>
+                                <input type="hidden" id="d-incompatible">
+                            </div>
+                        </div>
                     </div>
                     <div class="action-bar align-left" style="margin-top:12px;">
                         <button class="btn-primary" onclick="saveDrug()">💾 บันทึก</button>
@@ -267,6 +329,8 @@
                         <button class="tab-btn" data-list-type="pack_size_unit">หน่วยขนาดบรรจุ</button>
                         <button class="tab-btn" data-list-type="strength_unit">หน่วยความแรง</button>
                         <button class="tab-btn" data-list-type="category">หมวดหมู่</button>
+                        <button class="tab-btn" data-list-type="drug_type">ประเภทยา</button>
+                        <button class="tab-btn" data-list-type="dosage_form">รูปแบบยา</button>
                     </div>
                     <div class="manage-options-add">
                         <input type="text" id="manage-options-new-value" placeholder="เพิ่มตัวเลือกใหม่...">
@@ -274,9 +338,18 @@
                     </div>
                     <div id="manage-options-list"></div>
                 </div>
-                <div class="table-scroll">
+                <div class="action-bar" style="gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+                    <input type="text" id="drug-search-input" placeholder="ค้นหารหัสยา หรือ ชื่อยา..." style="flex:1; min-width:200px;" oninput="applyDrugFilters()">
+                    <select id="drug-search-status" onchange="applyDrugFilters()">
+                        <option value="">สถานะ: ทั้งหมด</option>
+                        <option value="active">ใช้งาน</option>
+                        <option value="inactive">ปิดใช้งาน</option>
+                    </select>
+                    <button class="btn-outline btn-sm" onclick="clearDrugFilters()">ล้างตัวกรอง</button>
+                </div>
+                <div class="table-scroll" style="overflow-x:auto;">
                     <table class="data-table">
-                        <thead><tr><th>รหัสยา</th><th>ชื่อยา</th><th>ความแรง</th><th>ขนาดบรรจุ</th><th>หมวดหมู่</th><th>หน่วย</th><th>สถานะ</th><th></th></tr></thead>
+                        <thead><tr><th>รหัสยา</th><th>ชื่อยา</th><th>ความแรง</th><th>ขนาดบรรจุ</th><th>Trade name</th><th>หมวดหมู่</th><th>หน่วย</th><th>ราคาทุน/ขาย</th><th>Min-Max stock</th><th>สถานะ</th><th></th></tr></thead>
                         <tbody id="drugBody"></tbody>
                     </table>
                 </div>

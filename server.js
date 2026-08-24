@@ -55,6 +55,21 @@ app.use(session({
 }));
 
 // ---------- Core: theme, session-timeout widget, module picker — ไม่ต้อง login ----------
+// เลขเวอร์ชันแอปอ่านจาก .env (APP_VERSION) แทนที่จะ hardcode ไว้ในไฟล์ static — แก้แค่ .env แล้ว restart
+// ไม่ต้องไปแก้/redeploy ไฟล์ appVersion.shared.js เอง route นี้ต้องอยู่ก่อน express.static ด้านล่าง
+// เพื่อ intercept path นี้แทนไฟล์ static เดิม (ถ้าไม่ตั้ง APP_VERSION ไว้ ใช้ค่า fallback เดิมแทน)
+app.get('/core/js/shared/appVersion.shared.js', (req, res) => {
+    res.type('application/javascript');
+    res.send(
+`// appVersion.shared.js — สร้างแบบ dynamic จาก server.js โดยอ่านค่า APP_VERSION จาก .env (ดูคอมเมนต์ในไฟล์นี้)
+window.APP_VERSION = ${JSON.stringify(process.env.APP_VERSION || 'V.1.3.0')};
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('[data-app-version]').forEach(el => { el.textContent = window.APP_VERSION; });
+});
+`
+    );
+});
 app.use('/core', express.static(path.join(__dirname, 'core/public')));
 app.use('/shared-data', express.static(path.join(__dirname, 'shared-data')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'core/public/index.html')));

@@ -61,7 +61,7 @@ async function seedDrugMasterIfEmpty() {
 
 // ---------- Lookup options (หน่วย / ขนาดบรรจุ / หน่วยความแรง / หมวดหมู่ — dropdown ที่แก้ไข/เพิ่มตัวเลือกเองได้ภายหลัง) ----------
 
-const VALID_LIST_TYPES = ['unit', 'pack_size_unit', 'strength_unit', 'category'];
+const VALID_LIST_TYPES = ['unit', 'pack_size_unit', 'strength_unit', 'category', 'drug_type', 'dosage_form'];
 
 function assertValidListType(listType) {
     if (!VALID_LIST_TYPES.includes(listType)) {
@@ -71,19 +71,36 @@ function assertValidListType(listType) {
     }
 }
 
+// ค่าเริ่มต้นสำหรับ dropdown "ประเภทยา"/"รูปแบบยา" — seed ให้เองในไฟล์นี้ (ไม่ผ่าน LOOKUP_SEED_DATA จาก
+// shared-data เพราะไฟล์นั้นยังไม่มีสองประเภทนี้) ใช้เฉพาะตอนตารางว่างเปล่าครั้งแรกเหมือนตัวเลือกอื่นๆ
+const LOCAL_LOOKUP_DEFAULTS = {
+    drug_type: ['injection', 'Tablet'],
+    dosage_form: [
+        'solution',
+        'powder for solution(Recon.NSS or SWFI)',
+        'powder for solution(Recon.NSS or D5W)',
+        'powder for solution(Recon.SWFI only)',
+        'powder for solution(Recon.Solvent,SWFI)',
+        'powder for solution(Recon.NSS)',
+        'Tablet'
+    ]
+};
+
 async function seedLookupOptionsIfEmpty() {
     await ready;
     for (const listType of VALID_LIST_TYPES) {
         const row = await dbGet(`SELECT COUNT(*) AS c FROM lookup_options WHERE list_type = ?`, [listType]);
         if (row?.c > 0) continue; // มีอยู่แล้ว (อาจถูกแก้ไขโดยผู้ใช้) — ไม่ seed ทับ
-        const values = LOOKUP_SEED_DATA[listType] || [];
+        const values = (LOOKUP_SEED_DATA[listType] && LOOKUP_SEED_DATA[listType].length)
+            ? LOOKUP_SEED_DATA[listType]
+            : (LOCAL_LOOKUP_DEFAULTS[listType] || []);
         await withTransaction(async () => {
             for (const value of values) {
                 await dbRun(`INSERT OR IGNORE INTO lookup_options (list_type, value, active) VALUES (?, ?, 1)`, [listType, value]);
             }
         });
     }
-    console.log('stock.db: seed ตัวเลือก dropdown เริ่มต้น (หน่วย/ขนาดบรรจุ/หน่วยความแรง/หมวดหมู่) เสร็จแล้ว (ครั้งแรกเท่านั้น)');
+    console.log('stock.db: seed ตัวเลือก dropdown เริ่มต้น (หน่วย/ขนาดบรรจุ/หน่วยความแรง/หมวดหมู่/ประเภทยา/รูปแบบยา) เสร็จแล้ว (ครั้งแรกเท่านั้น)');
 }
 // ---------- Migration: เพิ่มคอลัมน์ audit สำหรับการยกเลิกใบเบิก (เผื่อ DB เก่ายังไม่มี) ----------
 async function ensureCancelAuditColumns() {
@@ -108,6 +125,35 @@ async function ensureConcurrencyVersionColumns() {
     }
 }
 
+// ---------- Migration: เพิ่มคอลัมน์รายละเอียดยาเคมีบำบัด (ตามรายการ listยาเคมีบำบัด.xlsx) เข้า drug_master
+// (เผื่อ DB เก่ายังไม่มี) — ครอบคลุมชื่อการค้า/รูปแบบยา/ประเภทยา/หมายเหตุแหล่งจัดหา/ความเข้มข้นก่อน-หลังผสม/
+// อายุหลังเปิดขวด/ตัวทำละลาย/ยาที่เข้ากันได้-ไม่ได้/ราคาขาย/ระดับสต๊อกขั้นต่ำ-สูงสุด
+const DRUG_MASTER_EXTRA_COLUMNS = [
+    ['trade_name', 'TEXT'],
+    ['drug_type', 'TEXT'],
+    ['dosage_form', 'TEXT'],
+    ['remark', 'TEXT'],
+    ['conc_before_mix', 'TEXT'],
+    ['shelf_life_after_open', 'TEXT'],
+    ['max_conc_after_mix', 'TEXT'],
+    ['diluent', 'TEXT'],
+    ['compatible_drugs', 'TEXT'],
+    ['incompatible_drugs', 'TEXT'],
+    ['selling_price', 'REAL'],
+    ['min_stock_qty', 'REAL'],
+    ['max_stock_qty', 'REAL']
+];
+async function ensureDrugMasterExtraColumns() {
+    await ready;
+    const cols = await dbAll(`PRAGMA table_info(drug_master)`);
+    const names = cols.map(c => c.name);
+    for (const [col, type] of DRUG_MASTER_EXTRA_COLUMNS) {
+        if (!names.includes(col)) {
+            await dbRun(`ALTER TABLE drug_master ADD COLUMN ${col} ${type}`);
+        }
+    }
+}
+
 // รัน seed/migration ทั้งหมดตามลำดับเสมอ (ห้ามยิงพร้อมกัน) — sqlite connection เดียวรองรับ transaction ซ้อนกันไม่ได้
 // (เจอบั๊กจริง: "cannot start a transaction within a transaction" ตอนสอง seed function เริ่มพร้อมกันแบบไม่ chain)
 (async () => {
@@ -115,6 +161,7 @@ async function ensureConcurrencyVersionColumns() {
     try { await seedLookupOptionsIfEmpty(); } catch (err) { console.error('seed lookup_options ไม่สำเร็จ:', err); }
     try { await ensureCancelAuditColumns(); } catch (err) { console.error('migrate cancel-audit columns ไม่สำเร็จ:', err); }
     try { await ensureConcurrencyVersionColumns(); } catch (err) { console.error('migrate concurrency version columns ไม่สำเร็จ:', err); }
+    try { await ensureDrugMasterExtraColumns(); } catch (err) { console.error('migrate drug_master extra columns ไม่สำเร็จ:', err); }
 })();
 
 async function listLookupOptions(listType, { activeOnly } = {}) {
@@ -189,12 +236,17 @@ async function listDrugs({ activeOnly } = {}) {
     return rows;
 }
 
-async function createDrug({ drugCode, name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost }) {
+async function createDrug({
+    drugCode, name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost,
+    tradeName, drugType, dosageForm, remark, concBeforeMix, shelfLifeAfterOpen, maxConcAfterMix, diluent,
+    compatibleDrugs, incompatibleDrugs, sellingPrice, minStockQty, maxStockQty
+}) {
     if (!drugCode || !name) {
         const err = new Error('ต้องระบุรหัสยาและชื่อยา');
         err.status = 400;
         throw err;
     }
+    drugCode = drugCode.trim().toUpperCase(); // รหัสยาเป็นตัวพิมพ์ใหญ่เสมอ — บังคับฝั่ง backend ด้วยกันหลุดจาก frontend (เช่นยิง API ตรงๆ)
     const displayStrength = (strengthValue !== undefined && strengthValue !== null && strengthValue !== '')
         ? deriveStrengthDisplay(strengthValue, strengthUnit)
         : (strength || null);
@@ -203,9 +255,19 @@ async function createDrug({ drugCode, name, strength, strengthValue, strengthUni
         : (packSize || null);
     try {
         const { lastID } = await dbRun(
-            `INSERT INTO drug_master (drug_code, name, strength, strength_value, strength_unit, pack_size, pack_size_value, pack_size_unit, category, unit, default_cost, active)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-            [drugCode, name, displayStrength, strengthValue || null, strengthUnit || null, displayPackSize, packSizeValue || null, packSizeUnit || null, category || null, unit || null, defaultCost || null]
+            `INSERT INTO drug_master (
+                drug_code, name, strength, strength_value, strength_unit, pack_size, pack_size_value, pack_size_unit,
+                category, unit, default_cost, active,
+                trade_name, drug_type, dosage_form, remark, conc_before_mix, shelf_life_after_open,
+                max_conc_after_mix, diluent, compatible_drugs, incompatible_drugs, selling_price, min_stock_qty, max_stock_qty
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                drugCode, name, displayStrength, strengthValue || null, strengthUnit || null, displayPackSize, packSizeValue || null, packSizeUnit || null,
+                category || null, unit || null, defaultCost || null,
+                tradeName || null, drugType || null, dosageForm || null, remark || null,
+                concBeforeMix || null, shelfLifeAfterOpen || null, maxConcAfterMix || null, diluent || null,
+                compatibleDrugs || null, incompatibleDrugs || null, sellingPrice || null, minStockQty || null, maxStockQty || null
+            ]
         );
         const row = await dbGet(`SELECT * FROM drug_master WHERE id = ?`, [lastID]);
         eventBus.emit('drug:changed', { id: row.id, action: 'created' });
@@ -220,7 +282,11 @@ async function createDrug({ drugCode, name, strength, strengthValue, strengthUni
     }
 }
 
-async function updateDrug(id, { name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost, active, version }) {
+async function updateDrug(id, {
+    name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost, active, version,
+    tradeName, drugType, dosageForm, remark, concBeforeMix, shelfLifeAfterOpen, maxConcAfterMix, diluent,
+    compatibleDrugs, incompatibleDrugs, sellingPrice, minStockQty, maxStockQty
+}) {
     const existing = await dbGet(`SELECT * FROM drug_master WHERE id = ?`, [id]);
     if (!existing) {
         const err = new Error('ไม่พบรายการยาที่ระบุ');
@@ -245,7 +311,13 @@ async function updateDrug(id, { name, strength, strengthValue, strengthUnit, pac
     // เช็ค version ใน WHERE เดียวกับ UPDATE (pattern กลาง — ดู concurrency.util.js): กันสองคนแก้ยาตัวเดียวกัน
     // พร้อมกันแล้วคนหลังเขียนทับการแก้ไขของคนแรกไปเงียบๆ โดยไม่รู้ตัว
     await runGuardedUpdate(dbRun,
-        `UPDATE drug_master SET name = ?, strength = ?, strength_value = ?, strength_unit = ?, pack_size = ?, pack_size_value = ?, pack_size_unit = ?, category = ?, unit = ?, default_cost = ?, active = ?, version = version + 1 WHERE id = ? AND version = ?`,
+        `UPDATE drug_master SET
+            name = ?, strength = ?, strength_value = ?, strength_unit = ?, pack_size = ?, pack_size_value = ?, pack_size_unit = ?,
+            category = ?, unit = ?, default_cost = ?, active = ?,
+            trade_name = ?, drug_type = ?, dosage_form = ?, remark = ?, conc_before_mix = ?, shelf_life_after_open = ?,
+            max_conc_after_mix = ?, diluent = ?, compatible_drugs = ?, incompatible_drugs = ?, selling_price = ?, min_stock_qty = ?, max_stock_qty = ?,
+            version = version + 1
+         WHERE id = ? AND version = ?`,
         [
             name ?? existing.name,
             newDisplayStrength,
@@ -258,6 +330,19 @@ async function updateDrug(id, { name, strength, strengthValue, strengthUnit, pac
             unit ?? existing.unit,
             defaultCost ?? existing.default_cost,
             active === undefined ? existing.active : (active ? 1 : 0),
+            tradeName ?? existing.trade_name,
+            drugType ?? existing.drug_type,
+            dosageForm ?? existing.dosage_form,
+            remark ?? existing.remark,
+            concBeforeMix ?? existing.conc_before_mix,
+            shelfLifeAfterOpen ?? existing.shelf_life_after_open,
+            maxConcAfterMix ?? existing.max_conc_after_mix,
+            diluent ?? existing.diluent,
+            compatibleDrugs ?? existing.compatible_drugs,
+            incompatibleDrugs ?? existing.incompatible_drugs,
+            sellingPrice ?? existing.selling_price,
+            minStockQty ?? existing.min_stock_qty,
+            maxStockQty ?? existing.max_stock_qty,
             id,
             version
         ],
@@ -280,6 +365,45 @@ async function deleteDrug(id) {
     await dbRun(`UPDATE drug_master SET active = 0 WHERE id = ?`, [id]);
     eventBus.emit('drug:changed', { id, action: 'deactivated' });
     return { id, active: 0 };
+}
+
+// เปิดใช้งานกลับ (undo ของ deleteDrug ด้านบน) — ให้ยารายการที่เคย "ปิดใช้งาน" กลับมาแสดงใน dropdown
+// เลือกยาต่างๆ ได้อีกครั้ง ไม่กระทบประวัติเก่าเพราะไม่ได้ลบข้อมูลไปตั้งแต่แรก
+async function reactivateDrug(id) {
+    const existing = await dbGet(`SELECT * FROM drug_master WHERE id = ?`, [id]);
+    if (!existing) {
+        const err = new Error('ไม่พบรายการยาที่ระบุ');
+        err.status = 404;
+        throw err;
+    }
+    await dbRun(`UPDATE drug_master SET active = 1 WHERE id = ?`, [id]);
+    eventBus.emit('drug:changed', { id, action: 'reactivated' });
+    return { id, active: 1 };
+}
+
+// ลบถาวรจริง (ลบแถวออกจากตาราง) — ต่างจาก deleteDrug ด้านบนที่เป็น soft-delete เท่านั้น
+// ยังปลอดภัยกับประวัติเก่าเช่นกันเพราะใบเบิก/ใบรับเข้า/สต๊อกเก่าเก็บชื่อ/ความแรง denormalized แยกไว้แล้ว
+// ไม่มี FK อ้างถึง drug_master.id — แต่ตัวรายการยาเองจะหายไปจากระบบถาวร กู้คืนไม่ได้
+// ลบถาวรจริง — ต้องยืนยันด้วยรหัสผ่านเดียวกับ clearTestData (SUDO_CLEAR_PASSWORD) เพราะเป็นการลบข้อมูล
+// ถาวร กู้คืนไม่ได้เช่นกัน
+async function hardDeleteDrug(id, password) {
+    if (!password || password !== process.env.SUDO_CLEAR_PASSWORD) {
+        const err = new Error('รหัสผ่านไม่ถูกต้อง — ไม่ได้รับอนุญาตให้ลบรายการยาถาวร');
+        err.status = 403;
+        throw err;
+    }
+    const existing = await dbGet(`SELECT * FROM drug_master WHERE id = ?`, [id]);
+    if (!existing) {
+        const err = new Error('ไม่พบรายการยาที่ระบุ');
+        err.status = 404;
+        throw err;
+    }
+    await dbRun(`DELETE FROM drug_master WHERE id = ?`, [id]);
+    // pack ฐานข้อมูล (VACUUM) หลังลบถาวรทุกครั้ง เพื่อคืนพื้นที่ดิสก์ที่ลบไปจริงๆ — ต้องรันนอก
+    // transaction เสมอ (SQLite ไม่อนุญาตให้ VACUUM ระหว่าง BEGIN...COMMIT) เหมือน pattern ใน clearTestData
+    await dbRun('VACUUM');
+    eventBus.emit('drug:changed', { id, action: 'deleted' });
+    return { id, deleted: true };
 }
 
 function computeStatus(items) {
@@ -709,6 +833,8 @@ module.exports = {
     createDrug,
     updateDrug,
     deleteDrug,
+    reactivateDrug,
+    hardDeleteDrug,
     createRequisition,
     listRequisitions,
     getRequisition,
