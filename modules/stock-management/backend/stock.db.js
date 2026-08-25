@@ -867,10 +867,11 @@ async function reportNearExpiry(days = 90) {
 // ล้างเฉพาะตารางข้อมูลธุรกรรม (ใบเบิก/จัดส่ง/รับเข้า/สต๊อก) — ไม่แตะ drug_master เพราะเป็นข้อมูลอ้างอิง/ตั้งค่า ไม่ใช่ข้อมูลทดสอบ
 // ลบตามลำดับลูกก่อนแม่ (ตาราง requisitions เปิด foreign_keys ไว้) แล้วรีเซ็ต auto-increment ให้เริ่มนับใหม่จาก 1
 // VACUUM ต้องรันนอก transaction เสมอ (SQLite ไม่อนุญาตให้ VACUUM ระหว่าง BEGIN...COMMIT)
+// ใช้รหัสผ่าน sudo กลาง (SUDO_SUPERADMIN_PASSWORD ตัวเดียวกับ จัดการตัวเลือก/ลบถาวร) เพราะเป็นการลบข้อมูลถาวร กู้คืนไม่ได้
 async function clearTestData(password) {
-    if (!password || password !== process.env.SUDO_CLEAR_PASSWORD) {
+    if (!password || password !== process.env.SUDO_SUPERADMIN_PASSWORD) {
         const err = new Error('รหัสผ่านไม่ถูกต้อง — ไม่ได้รับอนุญาตให้ล้างข้อมูล');
-        err.status = 403;
+        err.status = 400; // ห้ามใช้ 401/403 — apiRequest ฝั่ง frontend ตีความเป็น "เซสชันหมดอายุ" เสมอ (ดู requireSudo ใน stock.routes.js)
         throw err;
     }
     const tables = [

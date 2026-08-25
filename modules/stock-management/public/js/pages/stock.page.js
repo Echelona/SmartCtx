@@ -1735,9 +1735,6 @@ async function autoFixLegacyDrugCodes() {
 
 // ===================== Danger Zone: ล้างข้อมูลทดสอบ =====================
 async function clearTestData() {
-    const password = document.getElementById('clearPassword').value;
-    if (!password) { showToast('กรุณากรอกรหัสผ่านยืนยัน', 'error'); return; }
-
     const confirmed = confirm(
         '⚠️ ยืนยันการล้างข้อมูล?\n\n' +
         'การกดตกลงจะลบใบเบิก/การจัดส่ง/การรับเข้าคลัง/สต๊อกคงเหลือ/ประวัติความเคลื่อนไหวทั้งหมดถาวร กู้คืนไม่ได้\n' +
@@ -1745,12 +1742,13 @@ async function clearTestData() {
     );
     if (!confirmed) return;
 
-    try {
-        await apiPost('/admin/clear-test-data', { password });
-        showToast('ล้างข้อมูลทดสอบสำเร็จ', 'success');
-        document.getElementById('clearPassword').value = '';
-        reloadAllViews();
-    } catch (err) { if (!err.sessionExpired) showToast(err.message, 'error'); }
+    requireSudoThen(async (sudoPassword) => {
+        try {
+            await apiPost('/admin/clear-test-data', { password: sudoPassword });
+            showToast('ล้างข้อมูลทดสอบสำเร็จ', 'success');
+            reloadAllViews();
+        } catch (err) { if (!err.sessionExpired) showToast(err.message, 'error'); }
+    });
 }
 
 function reloadAllViews() {

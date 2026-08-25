@@ -395,12 +395,8 @@
                 <p class="danger-warning">
                     ⚠️ การกดปุ่มนี้จะ<strong>ลบข้อมูลใบเบิก, การจัดส่ง, การรับเข้าคลัง, สต๊อกคงเหลือ, ประวัติความเคลื่อนไหว
                     และการปรับปรุงยอดทั้งหมดถาวร กู้คืนไม่ได้</strong> — ใช้เฉพาะช่วงทดสอบระบบเท่านั้น
-                    ห้ามใช้กับข้อมูลจริงเด็ดขาด (รายการยา/Drug Master จะไม่ถูกลบ)
+                    ห้ามใช้กับข้อมูลจริงเด็ดขาด (รายการยา/Drug Master จะไม่ถูกลบ) ต้องยืนยันด้วยสิทธิ์ superadmin
                 </p>
-                <div class="form-group" style="max-width:320px;">
-                    <label>รหัสผ่านยืนยัน (แยกจาก login ปกติ):</label>
-                    <input type="password" id="clearPassword" placeholder="กรอกรหัสผ่านเพื่อยืนยัน">
-                </div>
                 <button class="btn-danger" onclick="clearTestData()">🗑️ ล้างข้อมูลทั้งหมดถาวร</button>
             </div>
         </div>
