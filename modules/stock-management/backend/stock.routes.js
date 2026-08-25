@@ -86,6 +86,16 @@ router.post('/admin/checkpoint-database', async (req, res) => {
     catch (err) { handleError(res, err, 'Checkpoint ฐานข้อมูลไม่สำเร็จ'); }
 });
 
+// ---------- ตรวจสอบ/แก้ไขรหัสยาเดิมที่ไม่ตรงรูปแบบ yymmxxx อัตโนมัติ (เฉพาะที่ปลอดภัยจริง — ดู stock.db.js) ----------
+router.get('/admin/legacy-code-check', async (req, res) => {
+    try { res.json(await stock.checkLegacyDrugCodes()); }
+    catch (err) { handleError(res, err, 'ตรวจสอบรหัสยาเดิมไม่สำเร็จ'); }
+});
+router.post('/admin/legacy-code-autofix', async (req, res) => {
+    try { res.json(await stock.autoFixLegacyDrugCodes()); }
+    catch (err) { handleError(res, err, 'แก้ไขรหัสยาเดิมอัตโนมัติไม่สำเร็จ'); }
+});
+
 // ---------- Lookup options (หน่วย / ขนาดบรรจุ / หน่วยความแรง / หมวดหมู่) ----------
 
 router.get('/lookup-options', async (req, res) => {
@@ -119,12 +129,12 @@ router.get('/drugs', async (req, res) => {
 router.post('/drugs', async (req, res) => {
     try {
         const {
-            drugCode, name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost,
+            name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost,
             tradeName, drugType, dosageForm, remark, concBeforeMix, shelfLifeAfterOpen, maxConcAfterMix, diluent,
             compatibleDrugs, incompatibleDrugs, sellingPrice, minStockQty, maxStockQty
         } = req.body;
         res.status(201).json(await stock.createDrug({
-            drugCode, name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost,
+            name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost,
             tradeName, drugType, dosageForm, remark, concBeforeMix, shelfLifeAfterOpen, maxConcAfterMix, diluent,
             compatibleDrugs, incompatibleDrugs, sellingPrice, minStockQty, maxStockQty
         }));
@@ -144,6 +154,14 @@ router.put('/drugs/:id', async (req, res) => {
             compatibleDrugs, incompatibleDrugs, sellingPrice, minStockQty, maxStockQty
         }));
     } catch (err) { handleError(res, err, 'แก้ไขรายการยาไม่สำเร็จ'); }
+});
+
+// ตั้งค่า/ล้าง "รหัสยาที่ใช้แทน" (successor) — ใช้คู่กับการปิดใช้งานรายการเดิมตอนต้องย้ายไปรหัสใหม่ (ดู stock.db.js)
+router.put('/drugs/:id/superseded-by', async (req, res) => {
+    try {
+        const { supersededByCode } = req.body;
+        res.json(await stock.setSupersededBy(req.params.id, supersededByCode));
+    } catch (err) { handleError(res, err, 'ตั้งค่ารหัสยาที่ใช้แทนไม่สำเร็จ'); }
 });
 
 router.delete('/drugs/:id', async (req, res) => {

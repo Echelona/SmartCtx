@@ -141,7 +141,8 @@ const DRUG_MASTER_EXTRA_COLUMNS = [
     ['incompatible_drugs', 'TEXT'],
     ['selling_price', 'REAL'],
     ['min_stock_qty', 'REAL'],
-    ['max_stock_qty', 'REAL']
+    ['max_stock_qty', 'REAL'],
+    ['superseded_by_code', 'TEXT'] // รหัสยาที่ใช้แทน — ตั้งค่าตอนปิดใช้งานรายการนี้เพราะย้ายไปรหัสใหม่ (successor record, ดู setSupersededBy)
 ];
 async function ensureDrugMasterExtraColumns() {
     await ready;
@@ -236,17 +237,34 @@ async function listDrugs({ activeOnly } = {}) {
     return rows;
 }
 
+// สร้างรหัสยาอัตโนมัติ รูปแบบ yymmxxx — yy = ปี พ.ศ. (พุทธศักราช) 2 หลักท้าย, mm = เดือนปัจจุบัน (01-12),
+// xxx = ลำดับที่ 3 หลัก นับจากจำนวนรหัสยาที่ขึ้นต้นด้วย yymm เดียวกันที่มีอยู่แล้ว (ลำดับรีเซ็ตใหม่ทุกเดือน)
+// ต้องเรียกภายใน withTransaction เดียวกับ INSERT เสมอ (ดู createDrug) — SQLite BEGIN IMMEDIATE ล็อกการเขียน
+// ทำให้สอง request ที่สร้างยาพร้อมกันถูก serialize อัตโนมัติ กันได้เลขซ้ำกันจาก race condition
+async function generateDrugCode() {
+    const now = new Date();
+    const beYear = now.getFullYear() + 543; // พ.ศ. = ค.ศ. + 543
+    const yy = String(beYear).slice(-2);
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const prefix = `${yy}${mm}`;
+    // ใช้ underscore (SQLite LIKE wildcard แทนตัวอักษร 1 ตัว) x3 แทน % กว้างๆ — กันนับรวมรหัสเก่าที่บังเอิญ
+    // ขึ้นต้นด้วยตัวเลข 4 หลักเดียวกันแต่ยาวกว่า/รูปแบบต่างออกไป (เช่นรหัสเดิมก่อนเปลี่ยนมาใช้ระบบนี้)
+    const row = await dbGet(`SELECT COUNT(*) AS c FROM drug_master WHERE drug_code LIKE ?`, [`${prefix}___`]);
+    const seq = String((row?.c || 0) + 1).padStart(3, '0');
+    return `${prefix}${seq}`;
+}
+
 async function createDrug({
-    drugCode, name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost,
+    name, strength, strengthValue, strengthUnit, packSize, packSizeValue, packSizeUnit, category, unit, defaultCost,
     tradeName, drugType, dosageForm, remark, concBeforeMix, shelfLifeAfterOpen, maxConcAfterMix, diluent,
     compatibleDrugs, incompatibleDrugs, sellingPrice, minStockQty, maxStockQty
 }) {
-    if (!drugCode || !name) {
-        const err = new Error('ต้องระบุรหัสยาและชื่อยา');
+    if (!name) {
+        const err = new Error('ต้องระบุชื่อยา');
         err.status = 400;
         throw err;
     }
-    drugCode = drugCode.trim().toUpperCase(); // รหัสยาเป็นตัวพิมพ์ใหญ่เสมอ — บังคับฝั่ง backend ด้วยกันหลุดจาก frontend (เช่นยิง API ตรงๆ)
+    // รหัสยาสร้างอัตโนมัติเสมอ (รูปแบบ yymmxxx) — ไม่รับรหัสจาก client แม้ส่งมาก็ตาม กันหลุดผ่านการยิง API ตรงๆ
     const displayStrength = (strengthValue !== undefined && strengthValue !== null && strengthValue !== '')
         ? deriveStrengthDisplay(strengthValue, strengthUnit)
         : (strength || null);
@@ -254,22 +272,25 @@ async function createDrug({
         ? deriveStrengthDisplay(packSizeValue, packSizeUnit)
         : (packSize || null);
     try {
-        const { lastID } = await dbRun(
-            `INSERT INTO drug_master (
-                drug_code, name, strength, strength_value, strength_unit, pack_size, pack_size_value, pack_size_unit,
-                category, unit, default_cost, active,
-                trade_name, drug_type, dosage_form, remark, conc_before_mix, shelf_life_after_open,
-                max_conc_after_mix, diluent, compatible_drugs, incompatible_drugs, selling_price, min_stock_qty, max_stock_qty
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-                drugCode, name, displayStrength, strengthValue || null, strengthUnit || null, displayPackSize, packSizeValue || null, packSizeUnit || null,
-                category || null, unit || null, defaultCost || null,
-                tradeName || null, drugType || null, dosageForm || null, remark || null,
-                concBeforeMix || null, shelfLifeAfterOpen || null, maxConcAfterMix || null, diluent || null,
-                compatibleDrugs || null, incompatibleDrugs || null, sellingPrice || null, minStockQty || null, maxStockQty || null
-            ]
-        );
-        const row = await dbGet(`SELECT * FROM drug_master WHERE id = ?`, [lastID]);
+        const row = await withTransaction(async () => {
+            const drugCode = await generateDrugCode();
+            const { lastID } = await dbRun(
+                `INSERT INTO drug_master (
+                    drug_code, name, strength, strength_value, strength_unit, pack_size, pack_size_value, pack_size_unit,
+                    category, unit, default_cost, active,
+                    trade_name, drug_type, dosage_form, remark, conc_before_mix, shelf_life_after_open,
+                    max_conc_after_mix, diluent, compatible_drugs, incompatible_drugs, selling_price, min_stock_qty, max_stock_qty
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    drugCode, name, displayStrength, strengthValue || null, strengthUnit || null, displayPackSize, packSizeValue || null, packSizeUnit || null,
+                    category || null, unit || null, defaultCost || null,
+                    tradeName || null, drugType || null, dosageForm || null, remark || null,
+                    concBeforeMix || null, shelfLifeAfterOpen || null, maxConcAfterMix || null, diluent || null,
+                    compatibleDrugs || null, incompatibleDrugs || null, sellingPrice || null, minStockQty || null, maxStockQty || null
+                ]
+            );
+            return dbGet(`SELECT * FROM drug_master WHERE id = ?`, [lastID]);
+        });
         eventBus.emit('drug:changed', { id: row.id, action: 'created' });
         return row;
     } catch (err) {
@@ -350,6 +371,37 @@ async function updateDrug(id, {
     );
     const row = await dbGet(`SELECT * FROM drug_master WHERE id = ?`, [id]);
     eventBus.emit('drug:changed', { id: row.id, action: 'updated' });
+    return row;
+}
+
+// ตั้งค่า/ล้าง "รหัสยาที่ใช้แทน" (successor) — คู่กับ deleteDrug (soft-delete) ตอนรหัสยาเดิมถูกปิดใช้งานเพราะ
+// ต้องย้ายไปใช้รหัสใหม่แทน (รหัสยาแก้ไขตรงๆ ไม่ได้เลยตั้งแต่สร้างแล้ว — ต้องปิดใช้งานเดิม+สร้างใหม่เสมอ) ลิงก์นี้
+// ทำให้คนที่มาเจอรายการเก่าที่ถูกปิดใช้งานรู้ทันทีว่าต้องไปใช้รหัสไหนแทน (successor record pattern มาตรฐานของระบบ MDM) ส่ง supersededByCode เป็นค่าว่าง/null เพื่อล้างลิงก์
+async function setSupersededBy(id, supersededByCode) {
+    const existing = await dbGet(`SELECT * FROM drug_master WHERE id = ?`, [id]);
+    if (!existing) {
+        const err = new Error('ไม่พบรายการยาที่ระบุ');
+        err.status = 404;
+        throw err;
+    }
+    let code = null;
+    if (supersededByCode && supersededByCode.trim()) {
+        code = supersededByCode.trim().toUpperCase();
+        if (code === existing.drug_code) {
+            const err = new Error('รหัสยาที่ใช้แทนต้องไม่ใช่รหัสเดียวกับรายการนี้');
+            err.status = 400;
+            throw err;
+        }
+        const target = await dbGet(`SELECT id FROM drug_master WHERE drug_code = ?`, [code]);
+        if (!target) {
+            const err = new Error(`ไม่พบรหัสยา "${code}" ในระบบ — กรุณาสร้างรายการยาใหม่ด้วยรหัสนี้ก่อน แล้วค่อยกลับมาลิงก์`);
+            err.status = 400;
+            throw err;
+        }
+    }
+    await dbRun(`UPDATE drug_master SET superseded_by_code = ? WHERE id = ?`, [code, id]);
+    const row = await dbGet(`SELECT * FROM drug_master WHERE id = ?`, [id]);
+    eventBus.emit('drug:changed', { id: row.id, action: 'superseded_by_changed' });
     return row;
 }
 
@@ -824,15 +876,61 @@ async function clearTestData(password) {
     return { cleared: tables };
 }
 
+// ---------- ตรวจสอบ/แก้ไขรหัสยาเดิมที่ไม่ตรงรูปแบบ yymmxxx อัตโนมัติ (เฉพาะที่ปลอดภัยจริง) ----------
+// หลักการเดียวกับที่เคยใช้ตอนอนุญาตแก้รหัสยาโดยตรง (immutable-once-used): แก้อัตโนมัติได้เฉพาะรหัสที่ยังไม่
+// เคยมีธุรกรรมใดๆ อ้างถึงเลย (stock_lots/stock_movements/requisition_items/receipt_items) เท่านั้น — รหัสที่
+// เคยใช้แล้วจะไม่ถูกแตะต้องเด็ดขาด ต้องปิดใช้งานรายการเดิม (deleteDrug) แล้วสร้างใหม่ด้วย createDrug() เอง
+// (แล้วค่อยลิงก์ด้วย setSupersededBy ถ้าต้องการ) — ดูเหตุผลเต็มที่คอมเมนต์ createDrug ด้านบน
+const DRUG_CODE_FORMAT_RE = /^\d{7}$/; // yymmxxx = ตัวเลขล้วน 7 หลัก
+
+async function checkLegacyDrugCodes() {
+    const drugs = await dbAll(`SELECT id, drug_code FROM drug_master ORDER BY drug_code`);
+    const nonConforming = drugs.filter(d => !DRUG_CODE_FORMAT_RE.test(d.drug_code));
+    const safeToFix = [];
+    const needsManualMigration = [];
+    for (const d of nonConforming) {
+        const [lotCount, movementCount, reqItemCount, receiptItemCount] = await Promise.all([
+            dbGet(`SELECT COUNT(*) AS c FROM stock_lots WHERE drug_code = ?`, [d.drug_code]),
+            dbGet(`SELECT COUNT(*) AS c FROM stock_movements WHERE drug_code = ?`, [d.drug_code]),
+            dbGet(`SELECT COUNT(*) AS c FROM requisition_items WHERE drug_code = ?`, [d.drug_code]),
+            dbGet(`SELECT COUNT(*) AS c FROM receipt_items WHERE drug_code = ?`, [d.drug_code])
+        ]);
+        const usageCount = (lotCount?.c || 0) + (movementCount?.c || 0) + (reqItemCount?.c || 0) + (receiptItemCount?.c || 0);
+        if (usageCount === 0) safeToFix.push({ id: d.id, oldCode: d.drug_code });
+        else needsManualMigration.push({ id: d.id, oldCode: d.drug_code, usageCount });
+    }
+    return { totalChecked: drugs.length, nonConformingCount: nonConforming.length, safeToFix, needsManualMigration };
+}
+
+async function autoFixLegacyDrugCodes() {
+    const { safeToFix, needsManualMigration } = await checkLegacyDrugCodes();
+    const fixed = [];
+    // แก้ทีละรายการ (ไม่ใช่ Promise.all ขนาน) — แต่ละรายการอยู่ใน withTransaction ของตัวเอง ทำให้ generateDrugCode()
+    // ของรายการถัดไปนับรวมรหัสที่เพิ่งแก้ในรายการก่อนหน้าไปด้วย ลำดับ xxx จึงต่อเนื่องไม่ชนกันเอง
+    for (const item of safeToFix) {
+        const row = await withTransaction(async () => {
+            const newCode = await generateDrugCode();
+            await dbRun(`UPDATE drug_master SET drug_code = ?, version = version + 1 WHERE id = ?`, [newCode, item.id]);
+            return dbGet(`SELECT * FROM drug_master WHERE id = ?`, [item.id]);
+        });
+        fixed.push({ id: item.id, oldCode: item.oldCode, newCode: row.drug_code });
+        eventBus.emit('drug:changed', { id: item.id, action: 'code_changed', oldCode: item.oldCode, newCode: row.drug_code });
+    }
+    return { fixed, skipped: needsManualMigration };
+}
+
 module.exports = {
     clearTestData,
     checkpointDatabase,
+    checkLegacyDrugCodes,
+    autoFixLegacyDrugCodes,
     listLookupOptions,
     createLookupOption,
     updateLookupOption,
     listDrugs,
     createDrug,
     updateDrug,
+    setSupersededBy,
     deleteDrug,
     reactivateDrug,
     hardDeleteDrug,

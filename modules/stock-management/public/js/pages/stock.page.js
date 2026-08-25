@@ -1338,8 +1338,7 @@ async function openAddDrug() {
     if (!(await checkSessionValid())) { redirectToLoginIfExpired(); return; }
     editingDrugId = null;
     document.getElementById('drug-form-title').textContent = 'เพิ่มรายการยา';
-    document.getElementById('d-code').value = '';
-    document.getElementById('d-code').disabled = false;
+    document.getElementById('d-code').value = 'สร้างอัตโนมัติเมื่อบันทึก';
     document.getElementById('d-name').value = '';
     updateDrugDetailTitle();
     document.getElementById('d-strength-value').value = '';
@@ -1375,8 +1374,7 @@ async function openEditDrug(drug) {
     if (!(await checkSessionValid())) { redirectToLoginIfExpired(); return; }
     editingDrugId = drug.id;
     document.getElementById('drug-form-title').textContent = `แก้ไขรายการยา — ${drug.name}`;
-    document.getElementById('d-code').value = drug.drug_code;
-    document.getElementById('d-code').disabled = true; // รหัสยาเป็น key อ้างอิง ห้ามแก้หลังสร้างแล้ว (กันข้อมูลเก่าที่อ้างรหัสเดิมสับสน)
+    document.getElementById('d-code').value = drug.drug_code; // รหัสยาสร้างอัตโนมัติตอนสร้างรายการ แก้ไขภายหลังไม่ได้เลย (ดูเหตุผลใน createDrug/generateDrugCode)
     document.getElementById('d-name').value = drug.name;
     updateDrugDetailTitle();
     document.getElementById('d-strength-value').value = drug.strength_value ?? '';
@@ -1498,7 +1496,6 @@ async function saveDrug() {
     const strengthValueRaw = document.getElementById('d-strength-value').value;
     const packSizeValueRaw = document.getElementById('d-pack-value').value;
     const payload = {
-        drugCode: document.getElementById('d-code').value.trim().toUpperCase(),
         name: document.getElementById('d-name').value.trim(),
         strengthValue: strengthValueRaw !== '' ? Number(strengthValueRaw) : null,
         strengthUnit: document.getElementById('d-strength-unit').value.trim(),
@@ -1523,7 +1520,7 @@ async function saveDrug() {
         compatibleDrugs: document.getElementById('d-compatible').value.trim() || null,
         incompatibleDrugs: document.getElementById('d-incompatible').value.trim() || null
     };
-    if (!payload.drugCode || !payload.name) { showToast('กรุณาระบุรหัสยาและชื่อยา', 'error'); return; }
+    if (!payload.name) { showToast('กรุณาระบุชื่อยา', 'error'); return; }
 
     // เช็ค session ก่อนส่งบันทึกทุกครั้ง — กันกรณีกรอกฟอร์มอยู่นานจน session หมดอายุไปโดยไม่รู้ตัว (ชั้นป้องกันแรก)
     // ชั้นที่สองคือ apiPost/apiPut ด้านล่างที่ดัก 401/403 (และ HTML ที่หลุดมาแทน JSON) ให้เองอยู่แล้วเผื่อกรณี
@@ -1536,10 +1533,11 @@ async function saveDrug() {
             // คนอื่นแก้ยารายการนี้ไปก่อนหน้าหรือไม่ ถ้า version ไม่ตรงจะได้ error 409 กลับมาแทนการเขียนทับเงียบๆ
             payload.version = window._drugMap?.[editingDrugId]?.version;
             await apiPut(`/drugs/${editingDrugId}`, payload);
+            showToast('บันทึกรายการยาสำเร็จ', 'success');
         } else {
-            await apiPost('/drugs', payload);
+            const created = await apiPost('/drugs', payload); // ไม่ส่ง drugCode — backend สร้างรหัสอัตโนมัติให้ (รูปแบบ yymmxxx)
+            showToast(`เพิ่มรายการยาสำเร็จ — รหัสยา: ${created.drug_code}`, 'success');
         }
-        showToast('บันทึกรายการยาสำเร็จ', 'success');
         closeAddDrug();
         await loadDrugs();
     } catch (err) {
@@ -1609,11 +1607,15 @@ function renderDrugTable() {
             <td>${escapeHtml(d.unit || '-')}</td>
             <td>${priceText}</td>
             <td>${stockRangeText}</td>
-            <td><span class="status-pill ${d.active ? 'active' : 'cancelled'}">${d.active ? 'ใช้งาน' : 'ปิดใช้งาน'}</span></td>
+            <td>
+                <span class="status-pill ${d.active ? 'active' : 'cancelled'}">${d.active ? 'ใช้งาน' : 'ปิดใช้งาน'}</span>
+                ${!d.active && d.superseded_by_code ? `<div style="font-size:12px; color:var(--color-text-faint,#666); margin-top:2px;">→ ${escapeHtml(d.superseded_by_code)}</div>` : ''}
+            </td>
             <td style="white-space:normal; min-width:210px;">
                 <div style="display:flex; flex-wrap:wrap; gap:4px;">
                 ${d.active ? `<button class="btn-outline btn-sm" data-drug-id="${d.id}" onclick="openEditDrug(window._drugMap[this.dataset.drugId])">✏️ แก้ไข</button>` : ''}
                 ${d.active ? `<button class="btn-outline btn-sm" style="color:var(--color-danger-text); border-color:var(--color-danger-text);" onclick="deleteDrugItem(${d.id})">❌ ปิดใช้งาน</button>` : `<button class="btn-outline btn-sm" style="color:var(--color-success-text,#1a7f37); border-color:var(--color-success-text,#1a7f37);" onclick="reactivateDrugItem(${d.id})">🔓 เปิดใช้งาน</button>`}
+                ${!d.active ? `<button class="btn-outline btn-sm" onclick="setSupersededByItem(${d.id}, '${escapeHtml(d.superseded_by_code || '').replace(/'/g, "\\'")}')">🔗 ${d.superseded_by_code ? 'แก้ไข' : 'ระบุ'}รหัสใหม่แทน</button>` : ''}
                 ${!d.active ? `<button class="btn-outline btn-sm" style="color:var(--color-danger-text); border-color:var(--color-danger-text);" onclick="hardDeleteDrugItem(${d.id}, '${escapeHtml(d.name).replace(/'/g, "\\'")}')">🗑️ ลบถาวร</button>` : ''}
                 </div>
             </td>
@@ -1652,6 +1654,19 @@ async function hardDeleteDrugItem(id, drugName) {
     } catch (err) { if (!err.sessionExpired) showToast(err.message, 'error'); }
 }
 
+// ตั้งค่า/แก้ไข/ล้าง "รหัสยาที่ใช้แทน" (successor) — ใช้กับรายการที่ปิดใช้งานแล้วเพราะย้ายไปรหัสใหม่ (ดู
+// setSupersededBy ใน stock.db.js) กรอกช่องว่างแล้วกดตกลง = ล้างลิงก์ทิ้ง ไม่ต้องกดยืนยันรหัสผ่านใดๆ
+// เพราะไม่กระทบข้อมูลธุรกรรม เป็นแค่ metadata ช่วยนำทางเท่านั้น
+async function setSupersededByItem(id, currentCode) {
+    const input = prompt('รหัสยาใหม่ที่ใช้แทนรายการนี้ (เว้นว่างเพื่อล้างลิงก์):', currentCode || '');
+    if (input === null) return; // กดยกเลิก
+    try {
+        await apiPut(`/drugs/${id}/superseded-by`, { supersededByCode: input.trim() });
+        showToast(input.trim() ? 'ระบุรหัสยาที่ใช้แทนแล้ว' : 'ล้างลิงก์รหัสยาที่ใช้แทนแล้ว', 'success');
+        loadDrugs();
+    } catch (err) { if (!err.sessionExpired) showToast(err.message, 'error'); }
+}
+
 // ===================== บำรุงรักษาฐานข้อมูล: Checkpoint WAL → ไฟล์หลัก =====================
 // ไม่ลบข้อมูลใดๆ แค่รวมไฟล์ WAL เข้าไฟล์ warehouse.db หลัก ให้สำรอง/ย้ายได้ไฟล์เดียวจบ ไม่ต้อง zip
 async function checkpointDatabase() {
@@ -1664,6 +1679,44 @@ async function checkpointDatabase() {
         }
     } catch (err) { if (!err.sessionExpired) showToast(err.message, 'error'); }
 }
+
+// ===================== ตรวจสอบ/แก้ไขรหัสยาเดิมอัตโนมัติ (เฉพาะที่ปลอดภัย — ดู stock.db.js) =====================
+function renderLegacyCodeReport(report) {
+    const el = document.getElementById('legacy-code-report');
+    const btn = document.getElementById('legacy-code-autofix-btn');
+    if (report.nonConformingCount === 0) {
+        el.innerHTML = `<span style="color:var(--color-success-text,#1a7f37);">✅ รหัสยาทุกรายการ (${report.totalChecked}) ตรงรูปแบบ yymmxxx แล้ว</span>`;
+        btn.style.display = 'none';
+        return;
+    }
+    el.innerHTML = `
+        <div>ตรวจสอบทั้งหมด ${report.totalChecked} รายการ — พบ ${report.nonConformingCount} รายการไม่ตรงรูปแบบ</div>
+        <div style="color:var(--color-success-text,#1a7f37); margin-top:4px;">✅ แก้ไขอัตโนมัติได้ทันที (ยังไม่เคยใช้งาน): ${report.safeToFix.length} รายการ
+            ${report.safeToFix.length ? `<div style="font-size:12.5px; color:var(--color-text-faint,#666);">${report.safeToFix.map(x => escapeHtml(x.oldCode)).join(', ')}</div>` : ''}
+        </div>
+        <div style="color:var(--color-danger-text,#c0392b); margin-top:4px;">⚠️ ต้องแก้เอง (เคยมีธุรกรรมแล้ว): ${report.needsManualMigration.length} รายการ
+            ${report.needsManualMigration.length ? `<div style="font-size:12.5px; color:var(--color-text-faint,#666);">${report.needsManualMigration.map(x => `${escapeHtml(x.oldCode)} (${x.usageCount} ธุรกรรม)`).join(', ')}</div>` : ''}
+        </div>`;
+    btn.style.display = report.safeToFix.length ? 'inline-block' : 'none';
+}
+
+async function checkLegacyDrugCodes() {
+    try {
+        const report = await apiGet('/admin/legacy-code-check');
+        renderLegacyCodeReport(report);
+    } catch (err) { if (!err.sessionExpired) showToast(err.message, 'error'); }
+}
+
+async function autoFixLegacyDrugCodes() {
+    if (!confirm('ยืนยันแก้ไขรหัสยาอัตโนมัติเฉพาะรายการที่ยังไม่เคยใช้งาน (ปลอดภัย 100%)? รายการที่เคยใช้แล้วจะไม่ถูกแตะต้อง')) return;
+    try {
+        const result = await apiPost('/admin/legacy-code-autofix');
+        showToast(`แก้ไขรหัสยาอัตโนมัติแล้ว ${result.fixed.length} รายการ`, 'success');
+        loadDrugs();
+        checkLegacyDrugCodes(); // รีเฟรชรายงานให้ตรงกับสถานะล่าสุด
+    } catch (err) { if (!err.sessionExpired) showToast(err.message, 'error'); }
+}
+
 
 // ===================== Danger Zone: ล้างข้อมูลทดสอบ =====================
 async function clearTestData() {

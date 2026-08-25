@@ -226,7 +226,7 @@
                 <div class="add-drug-form" id="add-drug-form">
                     <h3 id="drug-form-title">เพิ่มรายการยา</h3>
                     <div class="drug-form-grid">
-                        <div class="form-group"><label>รหัสยา (Code)</label><input type="text" id="d-code" placeholder="เช่น CISPLATIN-50" style="text-transform:uppercase;" oninput="this.value = this.value.toUpperCase();"></div>
+                        <div class="form-group"><label>รหัสยา (Code)</label><input type="text" id="d-code" placeholder="สร้างอัตโนมัติ" style="text-transform:uppercase;" readonly></div>
                         <div class="form-group"><label>ชื่อยา (Item)</label><input type="text" id="d-name" placeholder="เช่น Cisplatin" oninput="updateDrugDetailTitle()"></div>
                         <div class="form-group"><label>ค่าความแรง (ตัวเลข)</label><input type="number" step="any" id="d-strength-value" placeholder="เช่น 50" onchange="updateStrengthPreview()"></div>
                         <div class="form-group">
@@ -376,6 +376,20 @@
                     กดได้ตลอดเวลา
                 </p>
                 <button class="btn-primary" onclick="checkpointDatabase()">📀 Checkpoint ฐานข้อมูล (รวม WAL เข้าไฟล์หลัก)</button>
+            </div>
+        </div>
+
+        <div class="card" style="margin-top:16px;">
+            <h3>🔍 ตรวจสอบรหัสยาเดิม (รูปแบบใหม่: yymmxxx)</h3>
+            <p style="font-size:13px; color:var(--color-text-faint,#666);">
+                รหัสยาที่สร้างใหม่ตอนนี้จะเป็นรูปแบบ <code>yymmxxx</code> อัตโนมัติ (yy = ปี พ.ศ., mm = เดือน, xxx = ลำดับ)
+                รายการเดิมที่ไม่ตรงรูปแบบนี้ ระบบจะแก้ให้อัตโนมัติเฉพาะรายการที่ <strong>ยังไม่เคยมีธุรกรรมใดๆ อ้างถึงเลย</strong>
+                (ปลอดภัย 100%) ส่วนรายการที่เคยมีสต๊อก/ใบเบิก/ใบรับเข้าแล้ว จะไม่ถูกแตะต้อง ต้องปิดใช้งาน+สร้างใหม่เอง
+            </p>
+            <div id="legacy-code-report" style="margin:12px 0; font-size:13.5px;"></div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button class="btn-outline" onclick="checkLegacyDrugCodes()">🔍 ตรวจสอบ</button>
+                <button class="btn-primary" id="legacy-code-autofix-btn" onclick="autoFixLegacyDrugCodes()" style="display:none;">🛠️ แก้ไขอัตโนมัติเฉพาะที่ปลอดภัย</button>
             </div>
         </div>
 
