@@ -989,6 +989,16 @@ function setConcBeforeOverride(active) {
     }
 }
 
+// พิมพ์ค่าตาม leaflet เสร็จแล้วคลิกออกจากช่อง (blur) — ล็อกกลับเป็น readonly ทันทีกันพิมพ์ผิดโดยไม่ตั้งใจภายหลัง
+// ค่า/สีส้ม/* ที่บ่งชี้ว่าเป็นค่าที่แก้เองยังคงอยู่เหมือนเดิม (ไม่รีเซ็ต concBeforeOverridden) ต้องกดปุ่ม
+// "📋 Leaflet" ใหม่ถึงจะพิมพ์แก้ได้อีกครั้ง
+function lockConcBeforeInput() {
+    const input = document.getElementById('d-conc-before');
+    input.readOnly = true;
+    input.style.cursor = 'not-allowed';
+    input.style.background = 'var(--color-bg-subtle,#f0f0f0)';
+}
+
 function updateConcBeforePreview() {
     if (concBeforeOverridden) return; // อยู่ในโหมดแก้ตาม leaflet เอง ไม่ต้องคำนวณทับค่าที่ผู้ใช้กรอกไว้
     const computed = computeConcBeforeMix();
