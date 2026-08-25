@@ -468,6 +468,35 @@ function openPasswordConfirm(title, message, onConfirm) {
     setTimeout(() => modal.querySelector('#pwConfirmInput').focus(), 50);
 }
 
+// ---------- Sudo gate (ฝั่ง client): ระบบกลางไว้ครอบ action ใดๆ ที่ต้องใช้สิทธิ์ sudo ในอนาคต ----------
+// รหัสผ่านตรวจสอบฝั่ง backend เท่านั้น (requireSudo middleware ใน stock.routes.js เทียบกับ SUDO_SUPERADMIN_PASSWORD
+// ใน .env) — ไม่มีรหัสผ่านฝังอยู่ในไฟล์นี้เลย เก็บรหัสผ่านที่ยืนยันแล้วไว้ใน sudoPasswordCache (หน่วยความจำ
+// ของแท็บนี้เท่านั้น หายเมื่อ reload หน้า) เพื่อไม่ต้องเด้งถามซ้ำทุก action ในเซสชันการทำงานเดียวกัน แต่ยังคง
+// ยืนยันกับ backend จริงทุกครั้งที่เรียกใช้ (ผ่าน /admin/verify-sudo หรือส่ง sudoPassword แนบไปกับ request ตรงๆ)
+//
+// วิธีใช้กับ action ใหม่ในอนาคต: ครอบ onclick เดิมด้วย requireSudoThen(() => ฟังก์ชันเดิม())
+let sudoPasswordCache = null;
+
+async function requireSudoThen(actionFn) {
+    if (sudoPasswordCache) {
+        try {
+            await apiPost('/admin/verify-sudo', { sudoPassword: sudoPasswordCache });
+            return actionFn(sudoPasswordCache);
+        } catch (err) {
+            sudoPasswordCache = null; // รหัสผ่านที่ cache ไว้ใช้ไม่ได้แล้ว (เช่นเปลี่ยนใน .env) — ถามใหม่ด้านล่าง
+        }
+    }
+    openPasswordConfirm(
+        'ยืนยันสิทธิ์ sudo',
+        'การดำเนินการนี้ต้องใช้สิทธิ์ sudo กรุณากรอกรหัสผ่านเพื่อยืนยัน',
+        async (password) => {
+            await apiPost('/admin/verify-sudo', { sudoPassword: password });
+            sudoPasswordCache = password;
+            await actionFn(password);
+        }
+    );
+}
+
 function cancelRequisition(id) {
     openPasswordConfirm(
         'ยืนยันยกเลิกใบเบิก',
@@ -889,7 +918,6 @@ function resetMovementsHistoryFilter() {
 let editingDrugId = null;
 const LOOKUP_LIST_TYPES = ['unit', 'pack_size_unit', 'strength_unit', 'category', 'drug_type', 'dosage_form'];
 let lookupCache = { unit: [], pack_size_unit: [], strength_unit: [], category: [], drug_type: [], dosage_form: [] };
-const LOOKUP_ADD_NEW_SENTINEL = '__add_new__';
 
 async function loadLookupOptions() {
     try {
@@ -913,28 +941,14 @@ function populateLookupSelect(fieldId, listType, selectedValue) {
     if (!sel) return;
     const current = selectedValue !== undefined ? selectedValue : sel.value;
     sel.innerHTML = '<option value="">-- เลือก --</option>' +
-        lookupCache[listType].map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.value)}</option>`).join('') +
-        `<option value="${LOOKUP_ADD_NEW_SENTINEL}">+ เพิ่มตัวเลือกใหม่...</option>`;
+        lookupCache[listType].map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.value)}</option>`).join('');
     if (current) sel.value = current;
 }
 
-// เลือก "+ เพิ่มตัวเลือกใหม่..." ในดรอปดาวน์ -> ถามค่าใหม่ บันทึกเข้า lookup_options แล้วเลือกให้ทันที
-async function onLookupSelectChange(fieldId, listType) {
-    const sel = document.getElementById(fieldId);
-    if (sel.value !== LOOKUP_ADD_NEW_SENTINEL) { updateStrengthPreview(); updatePackSizePreview(); return; }
-    const value = prompt('เพิ่มตัวเลือกใหม่:');
-    if (!value || !value.trim()) { sel.value = ''; return; }
-    try {
-        const created = await apiPost('/lookup-options', { listType, value: value.trim() });
-        lookupCache[listType].push(created);
-        lookupCache[listType].sort((a, b) => a.value.localeCompare(b.value));
-        populateAllLookupSelects();
-        sel.value = created.value;
-        showToast('เพิ่มตัวเลือกใหม่แล้ว', 'success');
-    } catch (err) {
-        sel.value = '';
-        showToast(err.message, 'error');
-    }
+// เดิมเลือก "+ เพิ่มตัวเลือกใหม่..." ในดรอปดาวน์นี้ได้เลย แต่ปิดไปแล้ว (เพิ่มตัวเลือกใหม่ทำได้ผ่าน "จัดการ
+// ตัวเลือก" ที่ต้องสิทธิ์ sudo เท่านั้น — ดู requireSudo/POST lookup-options ที่ปิดไว้ใน stock.routes.js)
+// ฟังก์ชันนี้จึงเหลือแค่ trigger คำนวณ preview ใหม่ตอนเปลี่ยนหน่วย/ขนาดบรรจุ
+function onLookupSelectChange(fieldId, listType) {
     updateStrengthPreview();
     updatePackSizePreview();
 }
@@ -1459,6 +1473,7 @@ async function renderManageOptionsList() {
                     <input type="text" id="lo-value-${o.id}" value="${escapeHtml(o.value)}">
                     <label style="font-size:12.5px; white-space:nowrap;"><input type="checkbox" id="lo-active-${o.id}" ${o.active ? 'checked' : ''}> ใช้งาน</label>
                     <button class="btn-outline btn-sm" data-opt-id="${o.id}" onclick="saveManageOption(this.dataset.optId)">บันทึก</button>
+                    <button class="btn-outline btn-sm" data-opt-id="${o.id}" style="color:var(--color-danger-text); border-color:var(--color-danger-text);" onclick="deleteManageOption(this.dataset.optId, '${escapeHtml(o.value).replace(/'/g, "\\'")}')">ลบ</button>
                 </div>`;
         }).join('');
     } catch (err) { container.innerHTML = `<div class="text-danger">โหลดไม่สำเร็จ: ${escapeHtml(err.message)}</div>`; }
@@ -1472,24 +1487,23 @@ async function saveManageOption(id) {
     // แก้ตัวเลือกนี้ไปก่อนหน้าหรือไม่ ถ้า version ไม่ตรงจะได้ error 409 กลับมาแทนการเขียนทับเงียบๆ
     const version = window._lookupOptionMap?.[id]?.version;
     try {
-        await apiPut(`/lookup-options/${id}`, { value, active, version });
+        await apiPut(`/lookup-options/${id}`, { value, active, version, sudoPassword: sudoPasswordCache });
         showToast('บันทึกตัวเลือกสำเร็จ', 'success');
         await loadLookupOptions();
         renderManageOptionsList();
     } catch (err) { if (!err.sessionExpired) showToast(err.message, 'error'); }
 }
 
-async function addManageOption() {
-    const input = document.getElementById('manage-options-new-value');
-    const value = input.value.trim();
-    if (!value) { showToast('กรุณากรอกค่าตัวเลือกใหม่', 'error'); return; }
+// ลบตัวเลือกออกจริง (ต่างจาก checkbox "ใช้งาน" ด้านบนซึ่งเป็นแค่ปิดใช้งานชั่วคราว) — ปลอดภัยเพราะรายการยาเดิม
+// เก็บค่า category/unit/strength_unit ฯลฯ เป็นข้อความตรงๆ ไม่ได้ผูกกับ id ของตัวเลือกนี้เลย (ดู stock.db.js)
+async function deleteManageOption(id, value) {
+    if (!confirm(`ลบตัวเลือก "${value}" ออกจากรายการนี้ถาวร? (รายการยาที่เคยเลือกค่านี้ไว้จะไม่ถูกกระทบ)`)) return;
     try {
-        await apiPost('/lookup-options', { listType: activeManageTab, value });
-        input.value = '';
-        showToast('เพิ่มตัวเลือกใหม่แล้ว', 'success');
+        await apiDelete(`/lookup-options/${id}`, { sudoPassword: sudoPasswordCache });
+        showToast('ลบตัวเลือกแล้ว', 'success');
         await loadLookupOptions();
         renderManageOptionsList();
-    } catch (err) { showToast(err.message, 'error'); }
+    } catch (err) { if (!err.sessionExpired) showToast(err.message, 'error'); }
 }
 
 async function saveDrug() {
@@ -1611,12 +1625,12 @@ function renderDrugTable() {
                 <span class="status-pill ${d.active ? 'active' : 'cancelled'}">${d.active ? 'ใช้งาน' : 'ปิดใช้งาน'}</span>
                 ${!d.active && d.superseded_by_code ? `<div style="font-size:12px; color:var(--color-text-faint,#666); margin-top:2px;">→ ${escapeHtml(d.superseded_by_code)}</div>` : ''}
             </td>
-            <td style="white-space:normal; min-width:210px;">
-                <div style="display:flex; flex-wrap:wrap; gap:4px;">
-                ${d.active ? `<button class="btn-outline btn-sm" data-drug-id="${d.id}" onclick="openEditDrug(window._drugMap[this.dataset.drugId])">✏️ แก้ไข</button>` : ''}
-                ${d.active ? `<button class="btn-outline btn-sm" style="color:var(--color-danger-text); border-color:var(--color-danger-text);" onclick="deleteDrugItem(${d.id})">❌ ปิดใช้งาน</button>` : `<button class="btn-outline btn-sm" style="color:var(--color-success-text,#1a7f37); border-color:var(--color-success-text,#1a7f37);" onclick="reactivateDrugItem(${d.id})">🔓 เปิดใช้งาน</button>`}
-                ${!d.active ? `<button class="btn-outline btn-sm" onclick="setSupersededByItem(${d.id}, '${escapeHtml(d.superseded_by_code || '').replace(/'/g, "\\'")}')">🔗 ${d.superseded_by_code ? 'แก้ไข' : 'ระบุ'}รหัสใหม่แทน</button>` : ''}
-                ${!d.active ? `<button class="btn-outline btn-sm" style="color:var(--color-danger-text); border-color:var(--color-danger-text);" onclick="hardDeleteDrugItem(${d.id}, '${escapeHtml(d.name).replace(/'/g, "\\'")}')">🗑️ ลบถาวร</button>` : ''}
+            <td style="white-space:normal; min-width:130px;">
+                <div style="display:flex; flex-direction:column; gap:4px;">
+                ${d.active ? `<button class="btn-outline btn-sm" data-drug-id="${d.id}" onclick="openEditDrug(window._drugMap[this.dataset.drugId])" style="width:100%;">✏️ แก้ไข</button>` : ''}
+                ${d.active ? `<button class="btn-outline btn-sm" style="color:var(--color-danger-text); border-color:var(--color-danger-text); width:100%;" onclick="deleteDrugItem(${d.id})">❌ ปิดใช้งาน</button>` : `<button class="btn-outline btn-sm" style="color:var(--color-success-text,#1a7f37); border-color:var(--color-success-text,#1a7f37); width:100%;" onclick="reactivateDrugItem(${d.id})">🔓 เปิดใช้งาน</button>`}
+                ${!d.active ? `<button class="btn-outline btn-sm" style="width:100%;" onclick="setSupersededByItem(${d.id}, '${escapeHtml(d.superseded_by_code || '').replace(/'/g, "\\'")}')">🔗 ${d.superseded_by_code ? 'แก้ไข' : 'ระบุ'}รหัสแทน</button>` : ''}
+                ${!d.active ? `<button class="btn-outline btn-sm" style="color:var(--color-danger-text); border-color:var(--color-danger-text); width:100%;" onclick="hardDeleteDrugItem(${d.id}, '${escapeHtml(d.name).replace(/'/g, "\\'")}')">🗑️ ลบถาวร</button>` : ''}
                 </div>
             </td>
         </tr>`;
@@ -1642,16 +1656,17 @@ async function reactivateDrugItem(id) {
     } catch (err) { if (!err.sessionExpired) showToast(err.message, 'error'); }
 }
 
-// ลบถาวรจริง — ต่างจาก deleteDrugItem (ปิดใช้งาน/soft delete) ด้านบน ต้องกรอกรหัสผ่านยืนยันก่อนเพราะกู้คืนไม่ได้
+// ลบถาวรจริง — ต่างจาก deleteDrugItem (ปิดใช้งาน/soft delete) ด้านบน ต้องยืนยันสิทธิ์ sudo ก่อนเพราะกู้คืนไม่ได้
+// ใช้รหัสผ่านชุดเดียวกับ จัดการตัวเลือก/เพิ่มเงื่อนไข (sudoPasswordCache/requireSudoThen — ดูคอมเมนต์ที่นิยามไว้)
 async function hardDeleteDrugItem(id, drugName) {
     if (!confirm(`⚠️ ลบรายการยา "${drugName}" ถาวร กู้คืนไม่ได้! ยืนยันหรือไม่?`)) return;
-    const password = prompt('กรอกรหัสผ่านยืนยัน (รหัสเดียวกับล้างข้อมูลทดสอบ):');
-    if (!password) return;
-    try {
-        await apiDelete(`/drugs/${id}/permanent`, { password });
-        showToast('ลบรายการยาถาวรแล้ว', 'success');
-        loadDrugs();
-    } catch (err) { if (!err.sessionExpired) showToast(err.message, 'error'); }
+    requireSudoThen(async (sudoPassword) => {
+        try {
+            await apiDelete(`/drugs/${id}/permanent`, { password: sudoPassword });
+            showToast('ลบรายการยาถาวรแล้ว', 'success');
+            loadDrugs();
+        } catch (err) { if (!err.sessionExpired) showToast(err.message, 'error'); }
+    });
 }
 
 // ตั้งค่า/แก้ไข/ล้าง "รหัสยาที่ใช้แทน" (successor) — ใช้กับรายการที่ปิดใช้งานแล้วเพราะย้ายไปรหัสใหม่ (ดู

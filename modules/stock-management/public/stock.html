@@ -274,12 +274,12 @@
                         <div class="form-group">
                             <label>อายุหลังเปิดขวดยา — รองรับค่าเดียว / ช่วง / หลายเงื่อนไขตามอุณหภูมิเก็บ</label>
                             <div id="d-shelf-life-list" style="display:flex; flex-direction:column; gap:8px;"></div>
-                            <button type="button" class="btn-outline btn-sm" onclick="addShelfLifeRow()" style="margin-top:6px;">+ เพิ่มเงื่อนไข</button>
+                            <button type="button" class="btn-outline btn-sm" onclick="requireSudoThen(() => addShelfLifeRow())" style="margin-top:6px;">+ เพิ่มเงื่อนไข</button>
                         </div>
                         <div class="form-group">
                             <label>Max conc.หลังผสม (mg/ml) — รองรับค่าเดียว / ช่วง / หลายเงื่อนไขตาม RT-อุณหภูมิ-เวลา</label>
                             <div id="d-max-conc-list" style="display:flex; flex-direction:column; gap:8px;"></div>
-                            <button type="button" class="btn-outline btn-sm" onclick="addMaxConcRow()" style="margin-top:6px;">+ เพิ่มเงื่อนไข</button>
+                            <button type="button" class="btn-outline btn-sm" onclick="requireSudoThen(() => addMaxConcRow())" style="margin-top:6px;">+ เพิ่มเงื่อนไข</button>
                         </div>
                         <div class="form-group"><label>Min stock (vial)</label><input type="number" step="any" id="d-min-stock"></div>
                         <div class="form-group"><label>Max stock (vial)</label><input type="number" step="any" id="d-max-stock"></div>
@@ -320,7 +320,7 @@
                     <div class="action-bar align-left" style="margin-top:12px;">
                         <button class="btn-primary" onclick="saveDrug()">💾 บันทึก</button>
                         <button class="btn-outline" onclick="closeAddDrug()">ยกเลิก</button>
-                        <button class="btn-outline" onclick="openManageOptions()">⚙️ จัดการตัวเลือก</button>
+                        <button class="btn-outline" onclick="requireSudoThen(() => openManageOptions())">⚙️ จัดการตัวเลือก</button>
                     </div>
                 </div>
 
@@ -336,10 +336,6 @@
                         <button class="tab-btn" data-list-type="category">หมวดหมู่</button>
                         <button class="tab-btn" data-list-type="drug_type">ประเภทยา</button>
                         <button class="tab-btn" data-list-type="dosage_form">รูปแบบยา</button>
-                    </div>
-                    <div class="manage-options-add">
-                        <input type="text" id="manage-options-new-value" placeholder="เพิ่มตัวเลือกใหม่...">
-                        <button class="btn-primary btn-sm" onclick="addManageOption()">+ เพิ่ม</button>
                     </div>
                     <div id="manage-options-list"></div>
                 </div>

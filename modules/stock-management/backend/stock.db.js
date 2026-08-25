@@ -230,6 +230,21 @@ async function updateLookupOption(id, { value, active, version }) {
     }
 }
 
+// ลบตัวเลือกออกจริง (ไม่ใช่ soft-delete) — ปลอดภัยเพราะ drug_master เก็บค่า category/unit/strength_unit ฯลฯ
+// เป็น TEXT ตรงๆ ไม่ได้ผูก FK กับ lookup_options.id เลย ลบตัวเลือกออกจึงแค่ทำให้ไม่ขึ้นในตัวเลือกใหม่ต่อไป
+// ไม่กระทบค่าที่มีอยู่แล้วในรายการยาเดิมที่เคยเลือกค่านี้ไว้
+async function deleteLookupOption(id) {
+    const existing = await dbGet(`SELECT * FROM lookup_options WHERE id = ?`, [id]);
+    if (!existing) {
+        const err = new Error('ไม่พบตัวเลือกที่ระบุ');
+        err.status = 404;
+        throw err;
+    }
+    await dbRun(`DELETE FROM lookup_options WHERE id = ?`, [id]);
+    eventBus.emit('lookup:changed', { listType: existing.list_type, action: 'deleted' });
+    return { deleted: true, id: existing.id, listType: existing.list_type, value: existing.value };
+}
+
 async function listDrugs({ activeOnly } = {}) {
     const rows = await dbAll(
         activeOnly ? `SELECT * FROM drug_master WHERE active = 1 ORDER BY name` : `SELECT * FROM drug_master ORDER BY name`
@@ -436,12 +451,12 @@ async function reactivateDrug(id) {
 // ลบถาวรจริง (ลบแถวออกจากตาราง) — ต่างจาก deleteDrug ด้านบนที่เป็น soft-delete เท่านั้น
 // ยังปลอดภัยกับประวัติเก่าเช่นกันเพราะใบเบิก/ใบรับเข้า/สต๊อกเก่าเก็บชื่อ/ความแรง denormalized แยกไว้แล้ว
 // ไม่มี FK อ้างถึง drug_master.id — แต่ตัวรายการยาเองจะหายไปจากระบบถาวร กู้คืนไม่ได้
-// ลบถาวรจริง — ต้องยืนยันด้วยรหัสผ่านเดียวกับ clearTestData (SUDO_CLEAR_PASSWORD) เพราะเป็นการลบข้อมูล
-// ถาวร กู้คืนไม่ได้เช่นกัน
+// ลบถาวรจริง — ต้องยืนยันด้วยรหัสผ่าน sudo กลาง (SUDO_SUPERADMIN_PASSWORD ตัวเดียวกับ จัดการตัวเลือก/เพิ่มเงื่อนไข)
+// เพราะเป็นการลบข้อมูลถาวร กู้คืนไม่ได้เช่นกัน
 async function hardDeleteDrug(id, password) {
-    if (!password || password !== process.env.SUDO_CLEAR_PASSWORD) {
+    if (!password || password !== process.env.SUDO_SUPERADMIN_PASSWORD) {
         const err = new Error('รหัสผ่านไม่ถูกต้อง — ไม่ได้รับอนุญาตให้ลบรายการยาถาวร');
-        err.status = 403;
+        err.status = 400; // ห้ามใช้ 401/403 — apiRequest ฝั่ง frontend ตีความเป็น "เซสชันหมดอายุ" เสมอ (ดู requireSudo ใน stock.routes.js)
         throw err;
     }
     const existing = await dbGet(`SELECT * FROM drug_master WHERE id = ?`, [id]);
@@ -927,6 +942,7 @@ module.exports = {
     listLookupOptions,
     createLookupOption,
     updateLookupOption,
+    deleteLookupOption,
     listDrugs,
     createDrug,
     updateDrug,

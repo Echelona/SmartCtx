@@ -16,6 +16,31 @@ function handleError(res, err, fallbackMsg) {
     res.status(err.status || 500).json({ error: err.message || fallbackMsg });
 }
 
+// ---------- Sudo gate: middleware ใช้ป้องกัน endpoint ที่ต้องการสิทธิ์สูงกว่าการ login ปกติ ----------
+// ใช้กับ route ในอนาคตได้เลยแค่แทรกเป็น middleware ตัวที่สอง เช่น:
+//   router.post('/some-sensitive-action', requireSudo, async (req, res) => {...})
+// รหัสผ่านตั้งค่าที่ SUDO_SUPERADMIN_PASSWORD ใน .env (ไม่ hardcode ในโค้ด — ดูเหตุผลเดียวกับรหัสผ่าน sudo อื่นๆ ในระบบนี้)
+// รับรหัสผ่านจาก req.body.sudoPassword เท่านั้น (ไม่รับจาก query string กัน log ไฟล์เผลอบันทึกรหัสผ่านไว้)
+// สำคัญ: ห้ามใช้ status 401/403 กับรหัสผ่านผิด — apiRequest ฝั่ง frontend (stock_page.js) ตีความ 401/403
+// ทุกตัวว่า "เซสชันหมดอายุ" เสมอ (เปิด popup login ใหม่) ถ้าใช้ 403 ตรงนี้ ผู้ใช้จะเห็น "session หมดอายุ" ผิดๆ
+// แทนที่จะเห็นข้อความ "รหัสผ่าน sudo ไม่ถูกต้อง" ที่ควรจะเป็น จึงใช้ 400 (Bad Request) แทนโดยเจตนา
+function requireSudo(req, res, next) {
+    if (!process.env.SUDO_SUPERADMIN_PASSWORD) {
+        return res.status(500).json({ error: 'เซิร์ฟเวอร์ยังไม่ได้ตั้งค่า SUDO_SUPERADMIN_PASSWORD ใน .env — ติดต่อผู้ดูแลระบบ' });
+    }
+    const password = req.body?.sudoPassword;
+    if (!password || password !== process.env.SUDO_SUPERADMIN_PASSWORD) {
+        return res.status(400).json({ error: 'รหัสผ่าน sudo ไม่ถูกต้อง' });
+    }
+    next();
+}
+
+// endpoint เปล่าๆ ไว้ให้ frontend เรียกยืนยันรหัสผ่าน sudo ก่อนทำ action ฝั่ง client ล้วนๆ ที่ไม่มี endpoint
+// ของตัวเอง (เช่น กดปุ่ม "+ เพิ่มเงื่อนไข" ในฟอร์ม — แค่เพิ่มแถวในหน่วยความจำ ยังไม่ได้บันทึกอะไรลง DB จริง)
+router.post('/admin/verify-sudo', requireSudo, (req, res) => {
+    res.json({ ok: true });
+});
+
 // ตรวจสอบพารามิเตอร์ช่วงวันที่ (from/to) ก่อนนำไป query เสมอ — ใช้ร่วมกันทุก endpoint ที่รับ from/to
 // (/requisitions, /receipts, /movements) กันทั้งรูปแบบวันที่ผิด (ไม่ใช่ YYYY-MM-DD) และช่วงกลับด้าน (จาก > ถึง)
 // โยน error status 400 พร้อมข้อความภาษาไทยที่ชัดเจน ให้ handleError ส่งกลับเป็น JSON error ตามปกติ
@@ -97,6 +122,8 @@ router.post('/admin/legacy-code-autofix', async (req, res) => {
 });
 
 // ---------- Lookup options (หน่วย / ขนาดบรรจุ / หน่วยความแรง / หมวดหมู่) ----------
+// GET ไม่ gate ด้วย sudo เพราะใช้ populate dropdown ทั่วทั้งแอป (strength unit, category, ฯลฯ) การแก้ไข/ลบ
+// เท่านั้นที่ต้องใช้สิทธิ์ sudo (จัดการตัวเลือก dropdown ต้องใช้สิทธิ์ superadmin)
 
 router.get('/lookup-options', async (req, res) => {
     try {
@@ -105,18 +132,23 @@ router.get('/lookup-options', async (req, res) => {
     } catch (err) { handleError(res, err, 'ดึงตัวเลือกไม่สำเร็จ'); }
 });
 
-router.post('/lookup-options', async (req, res) => {
-    try {
-        const { listType, value } = req.body;
-        res.status(201).json(await stock.createLookupOption(listType, value));
-    } catch (err) { handleError(res, err, 'เพิ่มตัวเลือกไม่สำเร็จ'); }
+// ปิดการเพิ่มตัวเลือกใหม่แล้วตามคำขอ — ตั้งใจไม่ลบ stock.createLookupOption() ออกจาก stock.db.js (เผื่อต้อง
+// seed ข้อมูลเองทาง DB ตรงๆ ในอนาคต) แค่ปิด endpoint นี้ไม่ให้เรียกผ่าน API/UI ได้อีก คืน 410 Gone ให้ชัดเจน
+// ว่าปิดตั้งใจ ไม่ใช่ route หาย/พังโดยไม่ได้ตั้งใจ (ต่างจาก 404 ที่บอกไม่ได้ว่าหายเพราะอะไร)
+router.post('/lookup-options', (req, res) => {
+    res.status(410).json({ error: 'ปิดการเพิ่มตัวเลือกใหม่แล้ว ติดต่อผู้ดูแลระบบถ้าจำเป็นต้องเพิ่มตัวเลือกใหม่จริงๆ' });
 });
 
-router.put('/lookup-options/:id', async (req, res) => {
+router.put('/lookup-options/:id', requireSudo, async (req, res) => {
     try {
         const { value, active, version } = req.body;
         res.json(await stock.updateLookupOption(req.params.id, { value, active, version }));
     } catch (err) { handleError(res, err, 'แก้ไขตัวเลือกไม่สำเร็จ'); }
+});
+
+router.delete('/lookup-options/:id', requireSudo, async (req, res) => {
+    try { res.json(await stock.deleteLookupOption(req.params.id)); }
+    catch (err) { handleError(res, err, 'ลบตัวเลือกไม่สำเร็จ'); }
 });
 
 // ---------- Drug master (item / ความแรง / ขนาดบรรจุ) ----------
