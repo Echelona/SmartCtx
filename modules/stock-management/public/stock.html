@@ -271,7 +271,11 @@
                                 <button type="button" class="btn-outline btn-sm" id="d-conc-before-calc-btn" onclick="setConcBeforeOverride(false)" title="ใช้ค่าที่คำนวณอัตโนมัติจากความแรง ÷ ขนาดบรรจุ (ยกเลิกค่าที่แก้เองตาม leaflet)" style="flex:1 1 auto; min-width:0; white-space:nowrap;">🧮 Calc.</button>
                             </div>
                         </div>
-                        <div class="form-group"><label>อายุหลังเปิดขวดยา (วัน)</label><input type="text" id="d-shelf-life" placeholder="เช่น 15"></div>
+                        <div class="form-group">
+                            <label>อายุหลังเปิดขวดยา — รองรับค่าเดียว / ช่วง / หลายเงื่อนไขตามอุณหภูมิเก็บ</label>
+                            <div id="d-shelf-life-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+                            <button type="button" class="btn-outline btn-sm" onclick="addShelfLifeRow()" style="margin-top:6px;">+ เพิ่มเงื่อนไข</button>
+                        </div>
                         <div class="form-group">
                             <label>Max conc.หลังผสม (mg/ml) — รองรับค่าเดียว / ช่วง / หลายเงื่อนไขตาม RT-อุณหภูมิ-เวลา</label>
                             <div id="d-max-conc-list" style="display:flex; flex-direction:column; gap:8px;"></div>

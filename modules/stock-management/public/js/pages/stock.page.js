@@ -1034,7 +1034,8 @@ function updatePackSizePreview() {
 // [{"min":0.5,"max":null,"tempType":"","tempLabel":"","durationValue":null,"durationUnit":"hr"}, ...]
 let maxConcEntries = [];
 
-const MAX_CONC_TEMP_OPTIONS = [
+// ตัวเลือกเงื่อนไขการเก็บ ใช้ร่วมกันทั้ง Max conc.หลังผสม และ อายุหลังเปิดขวดยา (ทั้งคู่ค่าอาจต่างกันตามอุณหภูมิเก็บ)
+const STORAGE_TEMP_OPTIONS = [
     { value: '', label: 'ไม่ระบุเงื่อนไข (ค่าเดียว/ช่วงเดียว)' },
     { value: 'RT', label: 'RT (อุณหภูมิห้อง)' },
     { value: 'fridge', label: '2-8°C (แช่เย็น)' },
@@ -1113,7 +1114,7 @@ function renderMaxConcRows() {
             </div>
             <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
                 <select class="mc-temp-type" style="min-width:180px;">
-                    ${MAX_CONC_TEMP_OPTIONS.map(o => `<option value="${o.value}" ${entry.tempType === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
+                    ${STORAGE_TEMP_OPTIONS.map(o => `<option value="${o.value}" ${entry.tempType === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
                 </select>
                 ${entry.tempType === 'other' ? `<input type="text" class="mc-temp-label" placeholder="ระบุอุณหภูมิ/เงื่อนไขเอง" value="${escapeHtmlAttr(entry.tempLabel ?? '')}" style="flex:1 1 140px; min-width:0;">` : ''}
                 <input type="number" step="any" class="mc-duration-value" placeholder="ระยะเวลา" value="${escapeHtmlAttr(entry.durationValue ?? '')}" style="width:90px;" ${entry.tempType ? '' : 'disabled title="เลือกเงื่อนไขอุณหภูมิก่อนถึงจะระบุระยะเวลาได้"'}>
@@ -1170,6 +1171,133 @@ function findApplicableMaxConc(entries, { tempType, elapsedHours } = {}) {
         const bestVal = best.max ?? best.min;
         return val < bestVal ? e : best;
     });
+}
+
+// ตัวเลือกเงื่อนไข "วิธีการให้ยา" — ใช้กับอายุหลังเปิดขวดยา (บางตัว stability ต่างกันตามวิธีให้ ไม่ใช่แค่อุณหภูมิเก็บ)
+const ROUTE_OPTIONS = [
+    { value: '', label: 'ไม่ระบุวิธีให้' },
+    { value: 'IV', label: 'IV (ฉีดเข้าหลอดเลือดดำ)' },
+    { value: 'IM', label: 'IM (ฉีดเข้ากล้ามเนื้อ)' },
+    { value: 'IT', label: 'IT (ฉีดเข้าช่องไขสันหลัง)' },
+    { value: 'SC', label: 'SC (ฉีดใต้ผิวหนัง)' },
+    { value: 'other', label: 'อื่นๆ (ระบุเอง)' }
+];
+
+// ---------- อายุหลังเปิดขวดยา — ออกแบบข้อมูลเหมือน Max conc.หลังผสม (ค่าเดียว/ช่วง/หลายเงื่อนไขตามอุณหภูมิ+วิธีให้ยา)
+// ต่างกันแค่ "ค่า" ในที่นี้คือระยะเวลาเอง (มีหน่วยวัน/ชม. เลือกได้) ไม่ต้องมี durationValue แยกอีกชั้นแบบ Max conc.
+// เก็บเป็น JSON string ก้อนเดียวในคอลัมน์ TEXT เดิม (shelf_life_after_open) ไม่ต้องแก้ schema เช่นกัน รูปแบบ:
+// [{"value":15,"max":null,"unit":"day","tempType":"","tempLabel":"","route":"","routeLabel":""}, ...]
+let shelfLifeEntries = [];
+
+function parseShelfLifeEntries(str) {
+    if (!str) return [];
+    const s = String(str).trim();
+    if (!s) return [];
+    if (s.startsWith('[')) {
+        try {
+            const parsed = JSON.parse(s);
+            if (Array.isArray(parsed)) {
+                return parsed.map(e => ({
+                    value: e.value ?? null, max: e.max ?? null, unit: e.unit || 'day',
+                    tempType: e.tempType || '', tempLabel: e.tempLabel || '',
+                    route: e.route || '', routeLabel: e.routeLabel || ''
+                }));
+            }
+        } catch (err) { /* ไม่ใช่ JSON — ตกไป parse แบบข้อความเดิมด้านล่าง (ข้อมูลเก่าก่อนเปลี่ยนมาเก็บ JSON) */ }
+    }
+    // รูปแบบเก่า: ตัวเลขค่าเดียวล้วนๆ เช่น "15" — แปลงเป็นโครงสร้างใหม่ตรงๆ ไม่มีเงื่อนไขอุณหภูมิ/วิธีให้
+    const n = Number(s);
+    if (!Number.isNaN(n)) return [{ value: n, max: null, unit: 'day', tempType: '', tempLabel: '', route: '', routeLabel: '' }];
+    // เผื่อข้อความอื่นที่ parse เป็นตัวเลขไม่ได้เลย — เก็บทั้งก้อนไว้ที่ tempLabel ไม่ให้ข้อมูลหาย
+    return [{ value: null, max: null, unit: 'day', tempType: 'other', tempLabel: s, route: '', routeLabel: '' }];
+}
+
+function composeShelfLifeEntries() {
+    const toNumOrNull = v => (v === '' || v === null || v === undefined || Number.isNaN(Number(v))) ? null : Number(v);
+    const cleaned = shelfLifeEntries
+        .map(e => ({
+            value: toNumOrNull(e.value),
+            max: toNumOrNull(e.max),
+            unit: e.unit || 'day',
+            tempType: e.tempType || '',
+            tempLabel: e.tempType === 'other' ? (e.tempLabel || '').trim() : '',
+            route: e.route || '',
+            routeLabel: e.route === 'other' ? (e.routeLabel || '').trim() : ''
+        }))
+        .filter(e => e.value !== null);
+    return cleaned.length ? JSON.stringify(cleaned) : null;
+}
+
+function renderShelfLifeRows() {
+    const container = document.getElementById('d-shelf-life-list');
+    if (shelfLifeEntries.length === 0) shelfLifeEntries.push({ value: '', max: '', unit: 'day', tempType: '', tempLabel: '', route: '', routeLabel: '' });
+
+    container.innerHTML = shelfLifeEntries.map((entry, idx) => `
+        <div class="shelf-life-entry" data-idx="${idx}" style="border:1px solid var(--color-border,#ddd); border-radius:6px; padding:8px; display:flex; flex-direction:column; gap:6px;">
+            <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
+                <input type="number" step="any" class="sl-value" placeholder="อายุ" value="${escapeHtmlAttr(entry.value ?? '')}" style="width:90px;">
+                <span>-</span>
+                <input type="number" step="any" class="sl-max" placeholder="ถึง (ถ้าเป็นช่วง)" value="${escapeHtmlAttr(entry.max ?? '')}" style="width:120px;">
+                <select class="sl-unit" style="width:80px;">
+                    <option value="day" ${entry.unit === 'day' ? 'selected' : ''}>วัน</option>
+                    <option value="hr" ${entry.unit === 'hr' ? 'selected' : ''}>ชม.</option>
+                </select>
+                <button type="button" class="btn-outline btn-sm sl-remove" style="margin-left:auto;">✕</button>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
+                <select class="sl-temp-type" style="min-width:180px;">
+                    ${STORAGE_TEMP_OPTIONS.map(o => `<option value="${o.value}" ${entry.tempType === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
+                </select>
+                ${entry.tempType === 'other' ? `<input type="text" class="sl-temp-label" placeholder="ระบุอุณหภูมิ/เงื่อนไขเอง" value="${escapeHtmlAttr(entry.tempLabel ?? '')}" style="flex:1 1 140px; min-width:0;">` : ''}
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
+                <select class="sl-route" style="min-width:180px;">
+                    ${ROUTE_OPTIONS.map(o => `<option value="${o.value}" ${entry.route === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
+                </select>
+                ${entry.route === 'other' ? `<input type="text" class="sl-route-label" placeholder="ระบุวิธีให้เอง" value="${escapeHtmlAttr(entry.routeLabel ?? '')}" style="flex:1 1 140px; min-width:0;">` : ''}
+            </div>
+        </div>
+    `).join('');
+
+    container.querySelectorAll('.shelf-life-entry').forEach(row => {
+        const idx = Number(row.dataset.idx);
+        row.querySelector('.sl-value').oninput = e => { shelfLifeEntries[idx].value = e.target.value; };
+        row.querySelector('.sl-max').oninput = e => { shelfLifeEntries[idx].max = e.target.value; };
+        row.querySelector('.sl-unit').onchange = e => { shelfLifeEntries[idx].unit = e.target.value; };
+        row.querySelector('.sl-temp-type').onchange = e => { shelfLifeEntries[idx].tempType = e.target.value; renderShelfLifeRows(); };
+        const tempLabelInput = row.querySelector('.sl-temp-label');
+        if (tempLabelInput) tempLabelInput.oninput = e => { shelfLifeEntries[idx].tempLabel = e.target.value; };
+        row.querySelector('.sl-route').onchange = e => { shelfLifeEntries[idx].route = e.target.value; renderShelfLifeRows(); };
+        const routeLabelInput = row.querySelector('.sl-route-label');
+        if (routeLabelInput) routeLabelInput.oninput = e => { shelfLifeEntries[idx].routeLabel = e.target.value; };
+        row.querySelector('.sl-remove').onclick = () => removeShelfLifeRow(idx);
+    });
+}
+
+function addShelfLifeRow() {
+    shelfLifeEntries.push({ value: '', max: '', unit: 'day', tempType: '', tempLabel: '', route: '', routeLabel: '' });
+    renderShelfLifeRows();
+    const vals = document.querySelectorAll('#d-shelf-life-list .sl-value');
+    if (vals.length) vals[vals.length - 1].focus();
+}
+
+function removeShelfLifeRow(idx) {
+    shelfLifeEntries.splice(idx, 1);
+    renderShelfLifeRows();
+}
+
+// ---------- ใช้คำนวณต่อ: หาอายุหลังเปิดขวดที่ใช้ได้จริงตามเงื่อนไขการเก็บ+วิธีให้ยา (เหมือน findApplicableMaxConc) ----------
+//   findApplicableShelfLife(parseShelfLifeEntries(drug.shelf_life_after_open), { tempType: 'RT', route: 'IV' })
+function findApplicableShelfLife(entries, { tempType, route } = {}) {
+    const matches = (entries || []).filter(e => {
+        const tempOk = e.tempType ? (!tempType || e.tempType === tempType) : !tempType;
+        const routeOk = e.route ? (!route || e.route === route) : !route;
+        return tempOk && routeOk;
+    });
+    if (!matches.length) return null;
+    // ถ้ามีหลายแถวตรงเงื่อนไข ให้ค่าที่สั้นที่สุด (เข้มงวดสุด) ไว้ก่อนเพื่อความปลอดภัย — แปลงหน่วยเป็นชั่วโมงก่อนเทียบ
+    const toHours = e => (e.unit === 'day' ? (e.max ?? e.value) * 24 : (e.max ?? e.value));
+    return matches.reduce((best, e) => (toHours(e) < toHours(best) ? e : best));
 }
 
 // ---------- ช่วยจัดการช่องกรอกแบบหลายค่า (chip/tag) — Dilution / Compatible / Incompatible ----------
@@ -1230,7 +1358,8 @@ async function openAddDrug() {
     document.getElementById('d-remark').value = '';
     setConcBeforeOverride(false);
     document.getElementById('d-conc-before').value = '';
-    document.getElementById('d-shelf-life').value = '';
+    shelfLifeEntries = [];
+    renderShelfLifeRows();
     maxConcEntries = [];
     renderMaxConcRows();
     document.getElementById('d-min-stock').value = '';
@@ -1274,7 +1403,8 @@ async function openEditDrug(drug) {
     } else {
         setConcBeforeOverride(false);
     }
-    document.getElementById('d-shelf-life').value = drug.shelf_life_after_open || '';
+    shelfLifeEntries = parseShelfLifeEntries(drug.shelf_life_after_open);
+    renderShelfLifeRows();
     maxConcEntries = parseMaxConcEntries(drug.max_conc_after_mix);
     renderMaxConcRows();
     document.getElementById('d-min-stock').value = drug.min_stock_qty ?? '';
@@ -1306,6 +1436,7 @@ function closeManageOptions() {
 
 document.addEventListener('DOMContentLoaded', () => {
     renderMaxConcRows();
+    renderShelfLifeRows();
     document.querySelectorAll('#manage-options-tabs .tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('#manage-options-tabs .tab-btn').forEach(b => b.classList.remove('active'));
@@ -1384,7 +1515,7 @@ async function saveDrug() {
         concBeforeMix: concBeforeOverridden
             ? (document.getElementById('d-conc-before').value.trim() || null)
             : computeConcBeforeMix(),
-        shelfLifeAfterOpen: document.getElementById('d-shelf-life').value.trim() || null,
+        shelfLifeAfterOpen: composeShelfLifeEntries(),
         maxConcAfterMix: composeMaxConcEntries(),
         diluent: document.getElementById('d-diluent').value.trim() || null,
         minStockQty: document.getElementById('d-min-stock').value ? Number(document.getElementById('d-min-stock').value) : null,
