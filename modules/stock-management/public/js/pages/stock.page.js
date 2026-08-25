@@ -947,7 +947,7 @@ function computeConcBeforeMix() {
     if (!strength || !packSize) return null;
     const conc = strength / packSize;
     if (!Number.isFinite(conc)) return null;
-    return Number(conc.toFixed(4)).toString();
+    return Math.round(conc).toString(); // ปัดเศษเป็นจำนวนเต็ม (เช่น 20.8 -> 21)
 }
 
 // ปุ่ม "📋 Leaflet conc." / "🧮 Calc. conc." — สลับระหว่างค่าที่แก้เองตามเอกสารกำกับยา (leaflet) กับค่าคำนวณ
