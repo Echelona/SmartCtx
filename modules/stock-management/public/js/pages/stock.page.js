@@ -1178,7 +1178,8 @@ const CHIP_FIELDS = ['diluent', 'compatible', 'incompatible'];
 let chipState = { diluent: [], compatible: [], incompatible: [] };
 
 function setChipValues(field, str) {
-    chipState[field] = (str || '').split(',').map(s => s.trim()).filter(Boolean);
+    // บังคับตัวพิมพ์ใหญ่เสมอ (เหมือน drug_code) — เผื่อข้อมูลเก่าที่ยังไม่ใช่ตัวพิมพ์ใหญ่ ให้แสดงผลสม่ำเสมอกัน
+    chipState[field] = (str || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
     renderChips(field);
 }
 function renderChips(field) {
@@ -1193,7 +1194,7 @@ function renderChips(field) {
 }
 function addChipValue(field) {
     const input = document.getElementById(`d-${field}-input`);
-    const v = input.value.trim();
+    const v = input.value.trim().toUpperCase(); // บังคับตัวพิมพ์ใหญ่เสมอ (ช่อง text-transform:uppercase ใน HTML ทำแค่แสดงผล ไม่ได้เปลี่ยนค่าจริง)
     if (!v) return;
     if (!chipState[field].includes(v)) chipState[field].push(v);
     input.value = '';

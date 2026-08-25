@@ -286,7 +286,7 @@
                             <label>💧 Dilution (Solvent)</label>
                             <div class="chip-input" id="d-diluent-chips" style="display:flex; flex-wrap:wrap; align-content:flex-start; gap:6px; min-height:36px; padding:6px 8px; border:1px solid var(--color-border,#ddd); border-radius:6px; background:#fff;"></div>
                             <div style="display:flex; gap:6px; margin-top:6px;">
-                                <input type="text" id="d-diluent-input" placeholder="พิมพ์แล้วกด Enter หรือ +" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addChipValue('diluent');}">
+                                <input type="text" id="d-diluent-input" placeholder="พิมพ์แล้วกด Enter หรือ +" style="flex:1; text-transform:uppercase;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addChipValue('diluent');}">
                                 <button type="button" class="btn-outline btn-sm" onclick="addChipValue('diluent')">+ เพิ่ม</button>
                             </div>
                             <input type="hidden" id="d-diluent">
@@ -297,7 +297,7 @@
                                 <label style="color:#1a7f37;">✅ Compatible</label>
                                 <div class="chip-input" id="d-compatible-chips" style="display:flex; flex-wrap:wrap; align-content:flex-start; gap:6px; min-height:68px; padding:6px 8px; border:1px solid #b7dfc1; border-radius:6px; background:#fff;"></div>
                                 <div style="display:flex; gap:6px; margin-top:6px;">
-                                    <input type="text" id="d-compatible-input" placeholder="พิมพ์แล้วกด Enter หรือ +" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addChipValue('compatible');}">
+                                    <input type="text" id="d-compatible-input" placeholder="พิมพ์แล้วกด Enter หรือ +" style="flex:1; text-transform:uppercase;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addChipValue('compatible');}">
                                     <button type="button" class="btn-outline btn-sm" onclick="addChipValue('compatible')">+ เพิ่ม</button>
                                 </div>
                                 <input type="hidden" id="d-compatible">
@@ -306,7 +306,7 @@
                                 <label style="color:#c0392b;">🚫 Incompatible</label>
                                 <div class="chip-input" id="d-incompatible-chips" style="display:flex; flex-wrap:wrap; align-content:flex-start; gap:6px; min-height:68px; padding:6px 8px; border:1px solid #f0b8b0; border-radius:6px; background:#fff;"></div>
                                 <div style="display:flex; gap:6px; margin-top:6px;">
-                                    <input type="text" id="d-incompatible-input" placeholder="พิมพ์แล้วกด Enter หรือ +" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addChipValue('incompatible');}">
+                                    <input type="text" id="d-incompatible-input" placeholder="พิมพ์แล้วกด Enter หรือ +" style="flex:1; text-transform:uppercase;" onkeydown="if(event.key==='Enter'){event.preventDefault(); addChipValue('incompatible');}">
                                     <button type="button" class="btn-outline btn-sm" onclick="addChipValue('incompatible')">+ เพิ่ม</button>
                                 </div>
                                 <input type="hidden" id="d-incompatible">
