@@ -451,10 +451,11 @@ async function reactivateDrug(id) {
 // ลบถาวรจริง (ลบแถวออกจากตาราง) — ต่างจาก deleteDrug ด้านบนที่เป็น soft-delete เท่านั้น
 // ยังปลอดภัยกับประวัติเก่าเช่นกันเพราะใบเบิก/ใบรับเข้า/สต๊อกเก่าเก็บชื่อ/ความแรง denormalized แยกไว้แล้ว
 // ไม่มี FK อ้างถึง drug_master.id — แต่ตัวรายการยาเองจะหายไปจากระบบถาวร กู้คืนไม่ได้
-// ลบถาวรจริง — ต้องยืนยันด้วยรหัสผ่าน sudo กลาง (SUDO_SUPERADMIN_PASSWORD ตัวเดียวกับ จัดการตัวเลือก/เพิ่มเงื่อนไข)
-// เพราะเป็นการลบข้อมูลถาวร กู้คืนไม่ได้เช่นกัน
+// ลบถาวรจริง — ต้องกรอกรหัสผ่าน login ของโมดูลนี้ซ้ำ (ADMIN_PASSWORD ตัวเดียวกับตอน login เข้าโมดูล
+// stock-management) เพื่อยืนยันตัวตนอีกครั้งก่อนลบถาวร (pattern "confirm your password" ทั่วไป) — ต่างจาก
+// SUDO_SUPERADMIN_PASSWORD ที่ใช้กับจัดการตัวเลือก/เพิ่มเงื่อนไข ซึ่งเป็นสิทธิ์คนละชั้นกัน
 async function hardDeleteDrug(id, password) {
-    if (!password || password !== process.env.SUDO_SUPERADMIN_PASSWORD) {
+    if (!password || password !== process.env.ADMIN_PASSWORD) {
         const err = new Error('รหัสผ่านไม่ถูกต้อง — ไม่ได้รับอนุญาตให้ลบรายการยาถาวร');
         err.status = 400; // ห้ามใช้ 401/403 — apiRequest ฝั่ง frontend ตีความเป็น "เซสชันหมดอายุ" เสมอ (ดู requireSudo ใน stock.routes.js)
         throw err;

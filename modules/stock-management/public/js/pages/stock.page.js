@@ -1658,15 +1658,20 @@ async function reactivateDrugItem(id) {
 
 // ลบถาวรจริง — ต่างจาก deleteDrugItem (ปิดใช้งาน/soft delete) ด้านบน ต้องยืนยันสิทธิ์ sudo ก่อนเพราะกู้คืนไม่ได้
 // ใช้รหัสผ่านชุดเดียวกับ จัดการตัวเลือก/เพิ่มเงื่อนไข (sudoPasswordCache/requireSudoThen — ดูคอมเมนต์ที่นิยามไว้)
+// ลบถาวร — ต่างจาก action sudo อื่นๆ ในระบบตรงที่ (1) ไม่ใช้ sudoPasswordCache ที่ค้างไว้จาก action อื่น
+// ต้องกรอกใหม่ทุกครั้งเสมอ และ (2) เช็คกับรหัสผ่าน login ปกติของโมดูลนี้ (ADMIN_PASSWORD) ไม่ใช่ SUDO_SUPERADMIN_PASSWORD
+// เพราะเป็นการลบข้อมูลถาวรกู้คืนไม่ได้ ความเสี่ยงสูงสุดในระบบ ต้องยืนยันตัวตนซ้ำทุกครั้งด้วยรหัสผ่าน login เอง
 async function hardDeleteDrugItem(id, drugName) {
     if (!confirm(`⚠️ ลบรายการยา "${drugName}" ถาวร กู้คืนไม่ได้! ยืนยันหรือไม่?`)) return;
-    requireSudoThen(async (sudoPassword) => {
-        try {
-            await apiDelete(`/drugs/${id}/permanent`, { password: sudoPassword });
+    openPasswordConfirm(
+        'ยืนยันรหัสผ่าน admin (ลบถาวร)',
+        `ลบ "${drugName}" ออกจากระบบถาวร กู้คืนไม่ได้ กรุณากรอกรหัสผ่าน admin (รหัสเดียวกับ login) เพื่อยืนยันอีกครั้ง`,
+        async (password) => {
+            await apiDelete(`/drugs/${id}/permanent`, { password });
             showToast('ลบรายการยาถาวรแล้ว', 'success');
             loadDrugs();
-        } catch (err) { if (!err.sessionExpired) showToast(err.message, 'error'); }
-    });
+        }
+    );
 }
 
 // ตั้งค่า/แก้ไข/ล้าง "รหัสยาที่ใช้แทน" (successor) — ใช้กับรายการที่ปิดใช้งานแล้วเพราะย้ายไปรหัสใหม่ (ดู
