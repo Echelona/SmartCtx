@@ -939,7 +939,7 @@ async function onLookupSelectChange(fieldId, listType) {
     updatePackSizePreview();
 }
 
-// Conc.ก่อนผสม (mg/ml) คำนวณอัตโนมัติจากความแรง (strength_value) ÷ ขนาดบรรจุ (pack_size_value) — readonly เสมอ
+// Conc.ก่อนผสม (mg/ml) คำนวณอัตโนมัติจากความแรง (strength_value) ÷ ขนาดบรรจุ (pack_size_value) — readonly โดยปกติ
 // ตัดเลข 0 ท้ายทศนิยมที่ไม่จำเป็นออก (เช่น 10.0000 -> 10, 0.5000 -> 0.5) ให้อ่านง่าย
 function computeConcBeforeMix() {
     const strength = parseFloat(document.getElementById('d-strength-value').value);
@@ -949,7 +949,48 @@ function computeConcBeforeMix() {
     if (!Number.isFinite(conc)) return null;
     return Number(conc.toFixed(4)).toString();
 }
+
+// ปุ่ม "📋 Leaflet conc." / "🧮 Calc. conc." — สลับระหว่างค่าที่แก้เองตามเอกสารกำกับยา (leaflet) กับค่าคำนวณ
+// อัตโนมัติจาก strength ÷ pack size (เช่น ยาบางตัวค่าจริงตาม leaflet ไม่ตรงกับค่าคำนวณเป๊ะๆ) ระหว่างอยู่ในโหมด
+// leaflet ช่องจะไม่ถูกคำนวณทับอัตโนมัติอีก และจะมีตัวอักษรสีส้ม + เครื่องหมาย * สีส้มกำกับไว้ให้เห็นชัดว่าเป็นค่าที่แก้เอง
+let concBeforeOverridden = false;
+
+function applyConcBeforeOverrideStyle(active) {
+    const input = document.getElementById('d-conc-before');
+    const mark = document.getElementById('d-conc-before-override-mark');
+    const leafletBtn = document.getElementById('d-conc-before-leaflet-btn');
+    const calcBtn = document.getElementById('d-conc-before-calc-btn');
+    input.readOnly = !active;
+    input.style.background = active ? '#fff' : 'var(--color-bg-subtle,#f0f0f0)';
+    input.style.cursor = active ? 'text' : 'not-allowed';
+    input.style.color = active ? '#e8590c' : '';
+    input.style.fontWeight = active ? '600' : '';
+    if (mark) mark.style.display = active ? 'inline' : 'none';
+    // ไฮไลต์ปุ่มที่ตรงกับโหมดปัจจุบันด้วยสีส้ม (leaflet = active) เพื่อให้เห็นชัดว่าตอนนี้อยู่โหมดไหน
+    if (leafletBtn) {
+        leafletBtn.style.borderColor = active ? '#e8590c' : '';
+        leafletBtn.style.color = active ? '#e8590c' : '';
+        leafletBtn.style.fontWeight = active ? '600' : '';
+    }
+    if (calcBtn) {
+        calcBtn.style.borderColor = !active ? '#e8590c' : '';
+        calcBtn.style.color = !active ? '#e8590c' : '';
+        calcBtn.style.fontWeight = !active ? '600' : '';
+    }
+}
+
+function setConcBeforeOverride(active) {
+    concBeforeOverridden = active;
+    applyConcBeforeOverrideStyle(active);
+    if (active) {
+        document.getElementById('d-conc-before').focus();
+    } else {
+        updateConcBeforePreview(); // กด Calc. conc. — กลับไปใช้ค่าคำนวณอัตโนมัติทันที
+    }
+}
+
 function updateConcBeforePreview() {
+    if (concBeforeOverridden) return; // อยู่ในโหมดแก้ตาม leaflet เอง ไม่ต้องคำนวณทับค่าที่ผู้ใช้กรอกไว้
     const computed = computeConcBeforeMix();
     document.getElementById('d-conc-before').value = computed !== null ? computed : '';
 }
@@ -1050,6 +1091,7 @@ async function openAddDrug() {
     populateLookupSelect('d-drug-type', 'drug_type', '');
     populateLookupSelect('d-dosage-form', 'dosage_form', '');
     document.getElementById('d-remark').value = '';
+    setConcBeforeOverride(false);
     document.getElementById('d-conc-before').value = '';
     document.getElementById('d-shelf-life').value = '';
     document.getElementById('d-max-conc-min').value = '';
@@ -1085,7 +1127,16 @@ async function openEditDrug(drug) {
     populateLookupSelect('d-drug-type', 'drug_type', drug.drug_type || '');
     populateLookupSelect('d-dosage-form', 'dosage_form', drug.dosage_form || '');
     document.getElementById('d-remark').value = drug.remark || '';
-    // d-conc-before คำนวณอัตโนมัติจาก updateStrengthPreview()/updatePackSizePreview() ที่เรียกไปแล้วด้านบน
+    // d-conc-before คำนวณอัตโนมัติจาก updateStrengthPreview()/updatePackSizePreview() ที่เรียกไปแล้วด้านบน — แต่ถ้าค่าที่
+    // บันทึกไว้จริงไม่ตรงกับค่าคำนวณ (เช่น เคยแก้ตามเอกสารกำกับยา/leaflet ไว้) ให้เปิดโหมด Leaflet conc. คืนให้อัตโนมัติ
+    const computedConcOnLoad = computeConcBeforeMix();
+    const savedConc = drug.conc_before_mix != null ? String(drug.conc_before_mix).trim() : '';
+    if (savedConc && savedConc !== (computedConcOnLoad || '')) {
+        setConcBeforeOverride(true);
+        document.getElementById('d-conc-before').value = savedConc;
+    } else {
+        setConcBeforeOverride(false);
+    }
     document.getElementById('d-shelf-life').value = drug.shelf_life_after_open || '';
     const maxConc = splitRangeValue(drug.max_conc_after_mix);
     document.getElementById('d-max-conc-min').value = maxConc.min;
@@ -1193,7 +1244,9 @@ async function saveDrug() {
         drugType: document.getElementById('d-drug-type').value.trim() || null,
         dosageForm: document.getElementById('d-dosage-form').value.trim() || null,
         remark: document.getElementById('d-remark').value.trim() || null,
-        concBeforeMix: computeConcBeforeMix(),
+        concBeforeMix: concBeforeOverridden
+            ? (document.getElementById('d-conc-before').value.trim() || null)
+            : computeConcBeforeMix(),
         shelfLifeAfterOpen: document.getElementById('d-shelf-life').value.trim() || null,
         maxConcAfterMix: composeRangeValue(document.getElementById('d-max-conc-min').value, document.getElementById('d-max-conc-max').value),
         diluent: document.getElementById('d-diluent').value.trim() || null,
