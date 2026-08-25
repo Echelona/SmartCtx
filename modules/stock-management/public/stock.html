@@ -273,12 +273,9 @@
                         </div>
                         <div class="form-group"><label>อายุหลังเปิดขวดยา (วัน)</label><input type="text" id="d-shelf-life" placeholder="เช่น 15"></div>
                         <div class="form-group">
-                            <label>Max conc.หลังผสม (mg/ml) — ช่วง</label>
-                            <div style="display:flex; align-items:center; gap:6px;">
-                                <input type="text" id="d-max-conc-min" placeholder="จาก เช่น 0.5" style="width:90px;">
-                                <span>-</span>
-                                <input type="text" id="d-max-conc-max" placeholder="ถึง เช่น 10" style="width:90px;">
-                            </div>
+                            <label>Max conc.หลังผสม (mg/ml) — รองรับค่าเดียว / ช่วง / หลายเงื่อนไขตาม RT-อุณหภูมิ-เวลา</label>
+                            <div id="d-max-conc-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+                            <button type="button" class="btn-outline btn-sm" onclick="addMaxConcRow()" style="margin-top:6px;">+ เพิ่มเงื่อนไข</button>
                         </div>
                         <div class="form-group"><label>Min stock (vial)</label><input type="number" step="any" id="d-min-stock"></div>
                         <div class="form-group"><label>Max stock (vial)</label><input type="number" step="any" id="d-max-stock"></div>

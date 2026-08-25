@@ -1027,23 +1027,149 @@ function updatePackSizePreview() {
     updateConcBeforePreview();
 }
 
-// ---------- ช่วยแยก/ประกอบค่า "ช่วง" (range) เช่น Conc.ก่อนผสม / Max conc.หลังผสม ----------
-// เก็บใน DB เป็น string เดียว "min-max" (หรือค่าเดียวถ้ามีแค่ min) ตามรูปแบบเดิมจากไฟล์ listยาเคมีบำบัด
-function splitRangeValue(str) {
-    if (!str) return { min: '', max: '' };
-    const s = String(str).trim();
-    const idx = s.indexOf('-');
-    // เผื่อค่าที่ไม่ใช่ตัวเลขล้วน (เช่น "0.2(RT48hr),0.4(RT24hr)") — แยกไม่ได้ชัดเจนก็ใส่ทั้งก้อนไว้ที่ช่อง "จาก" ไปก่อน ผู้ใช้แก้เองได้
-    if (idx > 0) {
-        return { min: s.slice(0, idx).trim(), max: s.slice(idx + 1).trim() };
-    }
-    return { min: s, max: '' };
+// ---------- Max conc.หลังผสม — ออกแบบให้เป็นข้อมูลโครงสร้าง (ไม่ใช่ข้อความอิสระ) เพื่อให้โมดูลคำนวณ/เตรียมยา
+// เรียกใช้ต่อได้จริง รองรับ 3 กรณี: (1) ค่าเดียว — 1 entry มีแค่ min (2) ค่าเป็นช่วง — 1 entry มี min+max
+// (3) หลายค่าตามเงื่อนไข RT/อุณหภูมิ/ระยะเวลาต่างกัน — หลาย entry แต่ละอันระบุ tempType+duration ของตัวเอง
+// เก็บลง DB เป็น JSON string ก้อนเดียวในคอลัมน์ TEXT เดิม (ไม่ต้องแก้ schema) รูปแบบ:
+// [{"min":0.5,"max":null,"tempType":"","tempLabel":"","durationValue":null,"durationUnit":"hr"}, ...]
+let maxConcEntries = [];
+
+const MAX_CONC_TEMP_OPTIONS = [
+    { value: '', label: 'ไม่ระบุเงื่อนไข (ค่าเดียว/ช่วงเดียว)' },
+    { value: 'RT', label: 'RT (อุณหภูมิห้อง)' },
+    { value: 'fridge', label: '2-8°C (แช่เย็น)' },
+    { value: 'freezer', label: 'แช่แข็ง' },
+    { value: 'other', label: 'อื่นๆ (ระบุเอง)' }
+];
+
+function escapeHtmlAttr(v) {
+    return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
-function composeRangeValue(min, max) {
-    min = (min || '').trim();
-    max = (max || '').trim();
-    if (min && max) return `${min}-${max}`;
-    return min || max || null;
+
+function parseMaxConcEntries(str) {
+    if (!str) return [];
+    const s = String(str).trim();
+    if (!s) return [];
+    if (s.startsWith('[')) {
+        try {
+            const parsed = JSON.parse(s);
+            if (Array.isArray(parsed)) {
+                return parsed.map(e => ({
+                    min: e.min ?? null,
+                    max: e.max ?? null,
+                    tempType: e.tempType || '',
+                    tempLabel: e.tempLabel || '',
+                    durationValue: e.durationValue ?? null,
+                    durationUnit: e.durationUnit || 'hr'
+                }));
+            }
+        } catch (err) { /* ไม่ใช่ JSON ที่ถูกต้อง — ตกไป parse แบบข้อความเดิมด้านล่างแทน (ข้อมูลเก่าก่อนเปลี่ยนมาเก็บ JSON) */ }
+    }
+    // รูปแบบเก่า: "ค่า(เงื่อนไข), ค่า(เงื่อนไข)" หรือ "min-max" หรือค่าเดียวเปล่าๆ — แปลงเป็นโครงสร้างใหม่ให้ดีที่สุด
+    // เท่าที่ทำได้ ตัวเลขจะถูกดึงมาคำนวณได้ปกติ ส่วนข้อความเงื่อนไขเดิมที่ parse เป็นอุณหภูมิ/เวลาไม่ได้จะถูกเก็บ
+    // ไว้ที่ tempLabel (ยังแสดงผลได้ ไม่ข้อมูลหาย แต่ยังใช้ในการคำนวณอัตโนมัติไม่ได้จนกว่าจะบันทึกซ้ำผ่านฟอร์มนี้)
+    return s.split(',').map(item => item.trim()).filter(Boolean).map(item => {
+        const condMatch = item.match(/^(.*?)\(([^)]*)\)\s*$/);
+        const valuePart = condMatch ? condMatch[1].trim() : item;
+        const condPart = condMatch ? condMatch[2].trim() : '';
+        const rangeMatch = valuePart.match(/^([\d.]+)\s*-\s*([\d.]+)$/);
+        let min = null, max = null;
+        if (rangeMatch) {
+            min = Number(rangeMatch[1]);
+            max = Number(rangeMatch[2]);
+        } else if (!Number.isNaN(Number(valuePart)) && valuePart !== '') {
+            min = Number(valuePart);
+        }
+        return { min, max, tempType: condPart ? 'other' : '', tempLabel: condPart, durationValue: null, durationUnit: 'hr' };
+    });
+}
+
+function composeMaxConcEntries() {
+    const toNumOrNull = v => (v === '' || v === null || v === undefined || Number.isNaN(Number(v))) ? null : Number(v);
+    const cleaned = maxConcEntries
+        .map(e => ({
+            min: toNumOrNull(e.min),
+            max: toNumOrNull(e.max),
+            tempType: e.tempType || '',
+            tempLabel: e.tempType === 'other' ? (e.tempLabel || '').trim() : '',
+            durationValue: e.tempType ? toNumOrNull(e.durationValue) : null,
+            durationUnit: e.durationUnit || 'hr'
+        }))
+        .filter(e => e.min !== null); // ต้องมีค่าอย่างน้อย min ถึงจะเก็บแถวนี้
+    return cleaned.length ? JSON.stringify(cleaned) : null;
+}
+
+function renderMaxConcRows() {
+    const container = document.getElementById('d-max-conc-list');
+    if (maxConcEntries.length === 0) maxConcEntries.push({ min: '', max: '', tempType: '', tempLabel: '', durationValue: '', durationUnit: 'hr' });
+
+    container.innerHTML = maxConcEntries.map((entry, idx) => `
+        <div class="max-conc-entry" data-idx="${idx}" style="border:1px solid var(--color-border,#ddd); border-radius:6px; padding:8px; display:flex; flex-direction:column; gap:6px;">
+            <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
+                <input type="number" step="any" class="mc-min" placeholder="ค่า (mg/ml)" value="${escapeHtmlAttr(entry.min ?? '')}" style="width:100px;">
+                <span>-</span>
+                <input type="number" step="any" class="mc-max" placeholder="ถึง (ถ้าเป็นช่วง)" value="${escapeHtmlAttr(entry.max ?? '')}" style="width:120px;">
+                <button type="button" class="btn-outline btn-sm mc-remove" style="margin-left:auto;">✕</button>
+            </div>
+            <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
+                <select class="mc-temp-type" style="min-width:180px;">
+                    ${MAX_CONC_TEMP_OPTIONS.map(o => `<option value="${o.value}" ${entry.tempType === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
+                </select>
+                ${entry.tempType === 'other' ? `<input type="text" class="mc-temp-label" placeholder="ระบุอุณหภูมิ/เงื่อนไขเอง" value="${escapeHtmlAttr(entry.tempLabel ?? '')}" style="flex:1 1 140px; min-width:0;">` : ''}
+                <input type="number" step="any" class="mc-duration-value" placeholder="ระยะเวลา" value="${escapeHtmlAttr(entry.durationValue ?? '')}" style="width:90px;" ${entry.tempType ? '' : 'disabled title="เลือกเงื่อนไขอุณหภูมิก่อนถึงจะระบุระยะเวลาได้"'}>
+                <select class="mc-duration-unit" style="width:80px;" ${entry.tempType ? '' : 'disabled'}>
+                    <option value="hr" ${entry.durationUnit === 'hr' ? 'selected' : ''}>ชม.</option>
+                    <option value="day" ${entry.durationUnit === 'day' ? 'selected' : ''}>วัน</option>
+                </select>
+            </div>
+        </div>
+    `).join('');
+
+    container.querySelectorAll('.max-conc-entry').forEach(row => {
+        const idx = Number(row.dataset.idx);
+        row.querySelector('.mc-min').oninput = e => { maxConcEntries[idx].min = e.target.value; };
+        row.querySelector('.mc-max').oninput = e => { maxConcEntries[idx].max = e.target.value; };
+        row.querySelector('.mc-temp-type').onchange = e => { maxConcEntries[idx].tempType = e.target.value; renderMaxConcRows(); };
+        const labelInput = row.querySelector('.mc-temp-label');
+        if (labelInput) labelInput.oninput = e => { maxConcEntries[idx].tempLabel = e.target.value; };
+        row.querySelector('.mc-duration-value').oninput = e => { maxConcEntries[idx].durationValue = e.target.value; };
+        row.querySelector('.mc-duration-unit').onchange = e => { maxConcEntries[idx].durationUnit = e.target.value; };
+        row.querySelector('.mc-remove').onclick = () => removeMaxConcRow(idx);
+    });
+}
+
+function addMaxConcRow() {
+    maxConcEntries.push({ min: '', max: '', tempType: '', tempLabel: '', durationValue: '', durationUnit: 'hr' });
+    renderMaxConcRows();
+    const mins = document.querySelectorAll('#d-max-conc-list .mc-min');
+    if (mins.length) mins[mins.length - 1].focus();
+}
+
+function removeMaxConcRow(idx) {
+    maxConcEntries.splice(idx, 1);
+    renderMaxConcRows();
+}
+
+// ---------- ใช้คำนวณต่อ: หาค่า Max conc.หลังผสมที่ใช้ได้จริงตามเงื่อนไขการเก็บจริง (อุณหภูมิ + เวลาที่ผ่านไปหลังผสม) ----------
+// เรียกด้วย entries จาก parseMaxConcEntries(drug.max_conc_after_mix) โดยตรง จากโมดูลคำนวณ/เตรียมยาอื่นๆ ได้เลย เช่น
+//   findApplicableMaxConc(parseMaxConcEntries(drug.max_conc_after_mix), { tempType: 'RT', elapsedHours: 20 })
+// ถ้ามีหลายแถวตรงเงื่อนไข จะคืนแถวที่ค่าสูงสุด (max หรือ min ถ้าไม่มี max) ต่ำที่สุด (เข้มงวดสุด) ไว้ก่อนเพื่อความปลอดภัย
+function findApplicableMaxConc(entries, { tempType, elapsedHours } = {}) {
+    const matches = (entries || []).filter(e => {
+        if (!e.tempType) return !tempType; // แถวที่ไม่ระบุเงื่อนไข ใช้ได้เฉพาะตอนไม่ได้ระบุเงื่อนไขค้นหาด้วยเช่นกัน
+        if (tempType && e.tempType !== tempType) return false;
+        if (elapsedHours != null && e.durationValue != null) {
+            const limitHours = e.durationUnit === 'day' ? e.durationValue * 24 : e.durationValue;
+            if (elapsedHours > limitHours) return false;
+        }
+        return true;
+    });
+    if (!matches.length) return null;
+    return matches.reduce((best, e) => {
+        const val = e.max ?? e.min;
+        const bestVal = best.max ?? best.min;
+        return val < bestVal ? e : best;
+    });
 }
 
 // ---------- ช่วยจัดการช่องกรอกแบบหลายค่า (chip/tag) — Dilution / Compatible / Incompatible ----------
@@ -1104,8 +1230,8 @@ async function openAddDrug() {
     setConcBeforeOverride(false);
     document.getElementById('d-conc-before').value = '';
     document.getElementById('d-shelf-life').value = '';
-    document.getElementById('d-max-conc-min').value = '';
-    document.getElementById('d-max-conc-max').value = '';
+    maxConcEntries = [];
+    renderMaxConcRows();
     document.getElementById('d-min-stock').value = '';
     document.getElementById('d-max-stock').value = '';
     CHIP_FIELDS.forEach(f => setChipValues(f, ''));
@@ -1148,9 +1274,8 @@ async function openEditDrug(drug) {
         setConcBeforeOverride(false);
     }
     document.getElementById('d-shelf-life').value = drug.shelf_life_after_open || '';
-    const maxConc = splitRangeValue(drug.max_conc_after_mix);
-    document.getElementById('d-max-conc-min').value = maxConc.min;
-    document.getElementById('d-max-conc-max').value = maxConc.max;
+    maxConcEntries = parseMaxConcEntries(drug.max_conc_after_mix);
+    renderMaxConcRows();
     document.getElementById('d-min-stock').value = drug.min_stock_qty ?? '';
     document.getElementById('d-max-stock').value = drug.max_stock_qty ?? '';
     setChipValues('diluent', drug.diluent);
@@ -1179,6 +1304,7 @@ function closeManageOptions() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    renderMaxConcRows();
     document.querySelectorAll('#manage-options-tabs .tab-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('#manage-options-tabs .tab-btn').forEach(b => b.classList.remove('active'));
@@ -1258,7 +1384,7 @@ async function saveDrug() {
             ? (document.getElementById('d-conc-before').value.trim() || null)
             : computeConcBeforeMix(),
         shelfLifeAfterOpen: document.getElementById('d-shelf-life').value.trim() || null,
-        maxConcAfterMix: composeRangeValue(document.getElementById('d-max-conc-min').value, document.getElementById('d-max-conc-max').value),
+        maxConcAfterMix: composeMaxConcEntries(),
         diluent: document.getElementById('d-diluent').value.trim() || null,
         minStockQty: document.getElementById('d-min-stock').value ? Number(document.getElementById('d-min-stock').value) : null,
         maxStockQty: document.getElementById('d-max-stock').value ? Number(document.getElementById('d-max-stock').value) : null,
